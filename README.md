@@ -1,61 +1,64 @@
-# SpectraEdge web workspace
+# SpectraEdge
 
-SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System.
+**SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System**
 
-This folder contains the browser edition of the university Signals and Linear Systems GUI prototype. The original Python/QML edition remains in the parent directory.
+This is the website project for the university Signals and Linear Systems project.
 
-## Run locally
+## Open the website
 
-Requires Node.js 22.13 or newer.
+On Windows, double-click **Start Website.cmd** in this folder. Keep the terminal open while using the website. Open the local address printed in the terminal (normally http://localhost:3000).
 
-```sh
-npm install
-npm run dev
+Or run from this folder:
+
+```powershell
+npm.cmd run dev
 ```
 
-Open the local URL printed in the terminal. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`.
+On macOS/Linux, use `npm run dev`. Node.js 22.13 or newer is required. No Python or desktop application installation is needed for this GUI phase.
 
-```sh
-npm run build
-npm start
+For a fresh copy, install the frontend dependencies once:
+
+```powershell
+npm.cmd run setup
 ```
 
-## Current scope
+## Where things belong
 
-- Analyze, Compare, and Live are separate browser routes.
-- Local image selection, drag/drop, metadata, zoom, pan, and image export work.
-- Parameters, display preferences, and reduced motion are saved locally on the device.
-- All calibration images, edge/gradient/FFT artwork, object values, and comparison times are explicitly demo fixtures.
-- Process Image walks through the demo pipeline. Uploaded image outputs remain empty.
-- No edge detection, convolution, FFT, contour detection, camera capture, or machine-vision algorithms are implemented.
-- No image bytes are uploaded or saved in browser storage. Reloading discards the selected image.
-- The exported JSON file identifies all sample metrics as demo values.
-
-## Architecture
-
-- `app/`: Analyze, Compare, and Live routes and shared layout.
-- `components/workspace-provider.tsx`: shared session, input validation, local preferences, and preview lifecycle.
-- `components/workspace.tsx`: navigation, page orchestration, dialogs, shortcuts, session export.
-- `components/parameters.tsx`: analysis controls.
-- `components/visualization.tsx`: image cards, static demonstration renderer, inspector.
-- `components/object-information.tsx` and `pipeline.tsx`: reusable analysis instruments.
-- `lib/workspace.ts`: typed parameters, demo fixtures, and future backend result contract.
-
-## Connecting the future Python backend
-
-The `AnalysisResult` interface defines `original_image`, `filtered_image`, `gx`, `gy`, `gradient_magnitude`, `edge_map`, `contour_image`, `fft_image`, `object_list`, `processing_time`, and `fps`.
-
-Add an HTTP API adapter when the processing phase begins. Keep a request identifier and parameter snapshot with each request so an outdated response cannot replace newer output. Return `provenance: "computed"` for real results. Use explicit busy, success, and error states. Replace demo rendering only when a validated result is available; never present demo fixtures as calculated output.
-
-Sites builds this React/TypeScript application with Vinext and Vite into a Workers-compatible deployment. The retained build scripts and `.openai/hosting.json` belong to that deployment workflow.
-
-## Checks
-
-```sh
-npm run lint
-npx tsc --noEmit --incremental false
-node --test tests/workspace.test.ts
-npm run build
+```text
+SpectraEdge/
+├── frontend/             Website: React, TypeScript, styles, and browser interactions
+│   ├── app/              Analyze, Compare, and Live routes
+│   ├── components/       Controls, image inspector, pipeline, and shared session
+│   ├── lib/              Parameters, demo data, and the future API result contract
+│   ├── public/           Website icons and images
+│   ├── tests/            Input and parameter validation checks
+│   ├── package.json      Frontend dependencies and commands
+│   └── README.md         Frontend architecture and integration notes
+├── backend/              Reserved for the future Python analysis API
+│   └── README.md         Backend scope and connection plan
+├── Start Website.cmd     Double-click to run locally on Windows
+├── package.json          Convenient commands from this project folder
+└── README.md             Start here
 ```
 
-The icon set is Lucide. The generated social card is in `public/og.png`.
+The entire project uses one Git repository at this root, including the frontend, backend folder, and startup files. The original website history is preserved. Hosting configuration remains under `frontend/.openai/`; local development does not publish or update a hosted website.
+
+## Current phase
+
+Analyze, Compare, and Live are interactive GUI pages. Local image selection, inspection, zoom, pan, exports, controls, and preferences work. All edge, gradient, contour, FFT, and comparison previews are labeled demo data.
+
+The processing backend and webcam capture are not implemented yet. Uploaded images stay in the browser and are not sent to a server. The `backend/` folder is preparation, not a second application you need to start.
+
+## Useful commands
+
+Run these from this project folder. Use `npm.cmd` in Windows PowerShell if its execution policy blocks `npm`.
+
+| Command | Purpose |
+| --- | --- |
+| `npm run setup` | Install frontend dependencies |
+| `npm run dev` | Start the local development website |
+| `npm run build` | Create a production build locally |
+| `npm start` | Serve an existing production build |
+| `npm run check` | Run lint, TypeScript checks, and validation tests |
+
+Stop a running website with **Ctrl+C** in its terminal. If port 3000 is already occupied, use the local URL printed by the server.
