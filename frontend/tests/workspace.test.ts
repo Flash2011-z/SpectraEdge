@@ -5,10 +5,18 @@ import { DEFAULT_PARAMETERS, restoreParameters, validateImage } from "../lib/wor
 test("corrupt stored preferences safely restore defaults", () => {
   assert.deepEqual(restoreParameters(null), DEFAULT_PARAMETERS);
   assert.deepEqual(restoreParameters("broken"), DEFAULT_PARAMETERS);
-  assert.deepEqual(restoreParameters({ detector: "Canny", kernel: 99, threshold: NaN }), DEFAULT_PARAMETERS);
+  assert.deepEqual(
+    restoreParameters({ detector: "Canny", kernel: 99, threshold: NaN }),
+    DEFAULT_PARAMETERS,
+  );
 });
 test("restored numeric settings stay within supported bounds and steps", () => {
-  const restored = restoreParameters({ sigma: 99, threshold: -2, minimumArea: 476, noiseStrength: Infinity });
+  const restored = restoreParameters({
+    sigma: 99,
+    threshold: -2,
+    minimumArea: 476,
+    noiseStrength: Infinity,
+  });
   assert.equal(restored.sigma, 5);
   assert.equal(restored.threshold, 0);
   assert.equal(restored.minimumArea, 500);
