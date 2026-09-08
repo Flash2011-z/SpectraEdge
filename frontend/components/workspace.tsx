@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   DEMO_OBJECTS,
+  ANALYSIS_STAGES,
   DETECTOR_DESCRIPTIONS,
   STAGES,
   type Preferences,
@@ -77,7 +78,7 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
             [
               "reducedMotion",
               "Reduce motion",
-              "Limit transitions and shorten the demo walkthrough.",
+              "Limit workspace transitions and animations.",
             ],
           ] as const
         ).map(([key, title, detail]) => (
@@ -98,8 +99,8 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
         <div className="privacy-note">
           <ShieldCheck size={16} />
           <p>
-            Selected images stay in browser memory. SpectraEdge saves only your display preferences
-            and parameter values on this device.
+            Process sends the selected image to your configured Python backend. Images and results
+            stay in memory and are not saved there. Only preferences and settings are stored on this device.
           </p>
         </div>
       </div>
@@ -124,7 +125,7 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
 }
 
 function CompareView() {
-  const { source, preferences, parameters, busy, process } = useWorkspace();
+  const { source, preferences, parameters } = useWorkspace();
   const demo = source.kind === "demo" && preferences.demoVisuals;
   return (
     <div className="compare-view">
@@ -157,9 +158,8 @@ function CompareView() {
               <dd>{parameters.threshold}</dd>
             </div>
           </dl>
-          <button className="button primary" onClick={process} disabled={busy}>
-            {busy ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}Preview
-            comparison
+          <button className="button primary" disabled>
+            <Play size={13} />Detector comparison not implemented
           </button>
         </div>
       </div>
@@ -191,7 +191,7 @@ function CompareView() {
             <p className="result-caption">
               {demo
                 ? "Preset visual and metrics · not a measured result"
-                : "Awaiting a connected processing service"}
+                : "Detector comparison is not implemented"}
             </p>
           </section>
         ))}
@@ -309,19 +309,26 @@ export default function Workspace({ view }: { view: View }) {
     process,
     loadDemo,
     selectedObject,
-    previewed,
+    result,
+    status,
+    error,
+    busy,
+    canProcess,
     loadingImage,
   } = useWorkspace();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const demo = source.kind === "demo" && preferences.demoVisuals;
+  const stages = source.kind === "demo" ? STAGES : ANALYSIS_STAGES;
+  const statusText = busy ? "Processing in Python…" : status === "success" ? "Analysis complete · detection not run"
+    : status === "error" ? "Analysis failed" : status === "outdated" ? "Settings changed · process again" : "Ready for an image analysis";
   const exportSession = useCallback(() => {
     downloadJson(
       {
-        schema_version: 1,
+        schema_version: 2,
         application: "SpectraEdge",
         exported_at: new Date().toISOString(),
-        mode: "gui-prototype",
+        mode: demo ? "illustrative-example" : "gaussian-fourier",
         source: {
           name: source.name,
           kind: source.kind,
@@ -329,7 +336,19 @@ export default function Workspace({ view }: { view: View }) {
           height: source.height,
         },
         parameters,
-        result: demo
+        result: result ? {
+          provenance: result.provenance,
+          request_id: result.request_id,
+          parameters_used: result.parameters_used,
+          source_dimensions: result.source_dimensions,
+          analyzed_dimensions: result.analyzed_dimensions,
+          completed_stages: result.completed_stages,
+          detection_status: result.detection_status,
+          object_list: result.object_list,
+          processing_time: result.processing_time,
+          timing_unit: "ms",
+          spectrum_scale: result.spectrum_scale,
+        } : demo
           ? {
               provenance: "demo",
               object_list: DEMO_OBJECTS,
@@ -338,12 +357,14 @@ export default function Workspace({ view }: { view: View }) {
               fps: null,
             }
           : null,
-        note: "Demo measurements are preset examples. No edge detection or frequency analysis has been performed.",
+        status,
+        note: result ? "Actual manual Gaussian and Fourier results. Detection has not run. Image data is exported separately from the cards."
+          : "No computed results for the current image/settings. Any demo measurements are illustrative only.",
       },
       "spectraedge-session.json",
     );
     notify("Session configuration exported. Image data is not included.");
-  }, [source, parameters, selectedObject, demo, notify]);
+  }, [source, parameters, selectedObject, demo, result, status, notify]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -364,7 +385,7 @@ export default function Workspace({ view }: { view: View }) {
       } else if (modifier && key === "r" && view === "analyze") {
         event.preventDefault();
         reset();
-      } else if (event.code === "Space" && view !== "live") {
+      } else if (event.code === "Space" && view === "analyze") {
         event.preventDefault();
         process();
       } else if (key === "?") {
@@ -411,7 +432,7 @@ export default function Workspace({ view }: { view: View }) {
         <div className="top-actions">
           <span className="mode-label">
             <i />
-            Prototype mode
+            Gaussian + Fourier
           </span>
           <span className="top-divider" />
           <IconButton label="Workspace settings" onClick={() => setDialog("settings")}>
@@ -451,12 +472,12 @@ export default function Workspace({ view }: { view: View }) {
             <div className="heading-actions">
               <span className="badge">
                 <FlaskConical size={11} />
-                {source.kind === "demo" ? "DEMO SESSION" : "LOCAL SESSION"}
+                {source.kind === "demo" ? "ILLUSTRATIVE EXAMPLE" : result ? "COMPUTED SESSION" : "LOCAL SESSION"}
               </span>
               <button
                 className="button"
                 onClick={exportSession}
-                title="Export parameters and clearly labeled demo measurements"
+                title="Export current configuration and computed result metadata"
               >
                 <ArrowDownToLine size={13} />
                 <span>Export session</span>
@@ -479,50 +500,69 @@ export default function Workspace({ view }: { view: View }) {
                   <span className="muted">
                     {source.kind === "demo"
                       ? "Explore a four-object reference scene"
-                      : "Original image only · processing not connected"}
+                      : result ? `Analyzed ${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} · ${result.processing_time.toFixed(1)} ms`
+                        : "Preview ≤512 px · Gaussian + manual Fourier"}
                   </span>
                 </div>
                 <button
                   className="text-button"
                   onClick={source.kind === "demo" ? () => openImagePicker() : loadDemo}
                 >
-                  {source.kind === "demo" ? "Use your own image" : "Load demo"}
+                  {source.kind === "demo" ? "Use your own image" : "Illustrative example"}
                   <ArrowRight size={12} />
                 </button>
+              </div>
+              <div className={`analysis-notice ${error ? "analysis-error" : ""}`} role={error ? "alert" : "status"}>
+                {busy ? <LoaderCircle size={15} className="spin" /> : <Info size={15} />}
+                <span>{error || (source.kind === "demo" ? "Separate illustrative example · no calculations or measured results." : statusText)}</span>
+                {error && <button className="text-button" disabled={!canProcess} onClick={process}>Try again</button>}
               </div>
               <VisualizationCard kind="original" index="01" large selected={stage === 0} />
               <div className="outputs-heading">
                 <span className="eyebrow">ANALYSIS OUTPUTS</span>
                 <span>
-                  {demo ? "Illustrative previews" : "Awaiting processing"}
+                  {demo ? "Illustrative previews" : result ? "Computed in Python" : "No current results"}
                   <span className="subtle-dot" />
-                  {parameters.detector} operator
+                  {demo ? `${parameters.detector} example` : "Detection not run"}
                 </span>
               </div>
-              <div className="output-grid">
+              <div className={`output-grid ${demo ? "" : "computed-grid"}`}>
+                {!demo && <VisualizationCard kind="grayscale" index="02" selected={stages[stage].view === "grayscale"} />}
                 <VisualizationCard
                   kind="filtered"
-                  index="02"
-                  selected={STAGES[stage].view === "filtered"}
+                  index="03"
+                  selected={stages[stage].view === "filtered"}
                 />
+                {!demo && <>
+                  <VisualizationCard kind="spectrum" index="04" selected={stages[stage].view === "spectrum"} />
+                  <VisualizationCard kind="filtered-spectrum" index="05" selected={stages[stage].view === "spectrum"} />
+                </>}
+                {demo && <>
                 <VisualizationCard
                   kind="edges"
                   index="03"
-                  selected={STAGES[stage].view === "edges"}
+                  selected={stages[stage].view === "edges"}
                 />
                 <VisualizationCard
                   kind="gradient"
                   index="04"
-                  selected={STAGES[stage].view === "gradient"}
+                  selected={stages[stage].view === "gradient"}
                 />
                 <VisualizationCard
                   kind="contours"
                   index="05"
-                  selected={STAGES[stage].view === "contours"}
+                  selected={stages[stage].view === "contours"}
                 />
                 <VisualizationCard kind="spectrum" index="06" />
+                </>}
+                {!demo && <VisualizationCard kind="edges" index="06" />}
                 <ObjectInformation />
               </div>
+              {!demo && <p className="spectrum-scale-note">
+                Both spectra share one grayscale display range: 0 to {result ? result.spectrum_scale.max.toFixed(4) : "—"} in log(1 + magnitude).
+                {result && ` Used σ=${result.parameters_used.sigma}, kernel ${result.parameters_used.kernel_size} × ${result.parameters_used.kernel_size}.`}
+                {" "}No detector, contour, or noise stages have run.
+              </p>}
               <Pipeline />
             </>
           ) : view === "compare" ? (
@@ -535,16 +575,16 @@ export default function Workspace({ view }: { view: View }) {
       <footer className="statusbar">
         <span>
           <i className="status-dot" />
-          {previewed ? "Demo walkthrough complete" : "Workspace ready"}
+          {source.kind === "demo" ? "Illustrative example" : view === "analyze" ? statusText : "Planned workspace · not implemented"}
         </span>
         <span className="status-metrics">
           Objects <b>{demo && view !== "live" ? "4" : "—"}</b>
           <em />
-          Time <b>{demo && view !== "live" ? "18 ms (demo)" : "—"}</b>
+          Time <b>{result && view === "analyze" ? `${result.processing_time.toFixed(1)} ms` : demo && view !== "live" ? "18 ms (demo)" : "—"}</b>
           <em />
-          Detector <b>{parameters.detector}</b>
+          Detector <b>{demo ? `${parameters.detector} (example)` : "not run"}</b>
           <em />
-          {view === "live" ? "No stream" : `${source.width} × ${source.height}`}
+          {view === "live" ? "No stream" : result ? `${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} analyzed` : `${source.width} × ${source.height} source`}
         </span>
         <button className="text-button" onClick={() => setDialog("shortcuts")}>
           <Keyboard size={12} />
@@ -591,23 +631,23 @@ export default function Workspace({ view }: { view: View }) {
             <dl className="about-facts">
               <div>
                 <dt>Current phase</dt>
-                <dd>Interactive GUI prototype</dd>
+                <dd>Gaussian + Fourier demonstration</dd>
               </div>
               <div>
                 <dt>Analysis engine</dt>
-                <dd>Not connected</dd>
+                <dd>Python · manual convolution and FFT</dd>
               </div>
               <div>
                 <dt>Image handling</dt>
-                <dd>Local to your browser</dd>
+                <dd>Opt-in processing · in memory only</dd>
               </div>
             </dl>
             <div className="privacy-note">
               <Cpu size={17} />
               <p>
-                Demo artwork and metrics illustrate the planned workflow. Edge detection, FFT,
-                convolution, contour detection, and live camera processing will be added in a later
-                phase.
+                Upload an image to calculate grayscale, Gaussian smoothing, and two Fourier spectra.
+                Detection, contours, detector comparison, and live camera processing are not implemented.
+                Calibration artwork and its measurements remain a separate illustrative example.
               </p>
             </div>
           </div>
@@ -656,7 +696,7 @@ export default function Workspace({ view }: { view: View }) {
             {[
               ["Open an image", "Ctrl / ⌘", "O"],
               ["Reset Analyze parameters", "Ctrl / ⌘", "R"],
-              ["Run demo walkthrough", "", "Space"],
+              ["Process Analyze image", "", "Space"],
               ["Workspace settings", "Ctrl / ⌘", ","],
               ["Keyboard shortcuts", "", "?"],
               ["Close a dialog", "", "Esc"],

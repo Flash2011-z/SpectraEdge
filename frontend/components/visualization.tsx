@@ -5,25 +5,29 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Download, Focus, ImageOff, Maximize2, Minus, Plus, ScanLine, ZoomIn } from "lucide-react";
-import { type Visualization } from "@/lib/workspace";
+import { resultImage, type Visualization } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 import { downloadFile, IconButton, Modal } from "./ui";
 
 const TITLES: Record<Visualization, string> = {
   original: "Original image",
-  filtered: "Filtered image",
+  grayscale: "Grayscale image",
+  filtered: "Gaussian-blurred image",
   edges: "Edge map",
   gradient: "Gradient magnitude",
   contours: "Object contours",
-  spectrum: "FFT spectrum",
+  spectrum: "FFT spectrum · original",
+  "filtered-spectrum": "FFT spectrum · smoothed",
 };
 const DESCRIPTIONS: Record<Visualization, string> = {
   original: "Input / spatial domain",
+  grayscale: "Grayscale intensity / spatial domain",
   filtered: "Gaussian smoothing",
   edges: "Binary edge representation",
   gradient: "Spatial intensity variation",
   contours: "Connected object boundaries",
   spectrum: "Log magnitude / frequency domain",
+  "filtered-spectrum": "Smoothed log magnitude / frequency domain",
 };
 
 // Static educational artwork only: no input pixels are processed by this renderer.
@@ -191,14 +195,16 @@ export function VisualSurface({
   interactive?: boolean;
   exportRef?: React.RefObject<HTMLCanvasElement | null>;
 }) {
-  const { source, preferences, selectedObject, setSelectedObject } = useWorkspace();
+  const { source, preferences, selectedObject, setSelectedObject, result, status } = useWorkspace();
   const ownRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = exportRef ?? ownRef;
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const demo = source.kind === "demo" && preferences.demoVisuals;
-  const uploaded = source.kind === "image" && kind === "original";
+  const computedUrl = resultImage(result, kind);
+  const imageUrl = computedUrl || (source.kind === "image" && kind === "original" ? source.url : null);
+  const unsupported = ["edges", "gradient", "contours"].includes(kind);
   useEffect(() => {
     if (demo && canvasRef.current)
       drawIllustration(canvasRef.current, kind, selectedObject, preferences.grid);
@@ -266,27 +272,27 @@ export function VisualSurface({
           aria-label={`Illustrative ${TITLES[kind].toLowerCase()} of four calibration shapes; not a calculated result.`}
           style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
         />
-      ) : uploaded ? (
+      ) : imageUrl ? (
         <img
           className="local-image"
-          src={source.url}
-          alt={source.name}
+          src={imageUrl}
+          alt={`${TITLES[kind]} of ${source.name}${computedUrl ? " · computed by Python" : " · local preview"}`}
           style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
           draggable={false}
         />
       ) : (
         <div className="empty-state">
           <ImageOff size={24} strokeWidth={1.25} />
-          <strong>{source.kind === "image" ? "Awaiting processing" : "No signal loaded"}</strong>
+          <strong>{unsupported ? "Not implemented" : status === "loading" ? "Calculating in Python…" : status === "outdated" ? "Results out of date" : "Awaiting analysis"}</strong>
           <span>
-            {source.kind === "image"
-              ? "Results will appear when analysis is connected."
-              : "Enable demo visuals in Settings to explore."}
+            {unsupported ? "Detection and contours have not run." : source.kind === "image"
+              ? "Click Process image to calculate with the current settings."
+              : "Upload an image, or open the separate illustrative example."}
           </span>
         </div>
       )}
       <span className="viewport-label">
-        {demo ? "ILLUSTRATIVE SAMPLE" : uploaded ? "LOCAL IMAGE" : "NO OUTPUT"}
+        {demo ? "ILLUSTRATIVE SAMPLE" : computedUrl ? "COMPUTED · PYTHON" : imageUrl ? "LOCAL PREVIEW" : "NO OUTPUT"}
       </span>
       {kind === "contours" && demo && !interactive && (
         <div className="object-hotspots" role="group" aria-label="Select an object">
@@ -305,7 +311,7 @@ export function VisualSurface({
           View x {cursor.x} / y {cursor.y}
         </span>
       )}
-      {!interactive && <span className="axis-label">{kind === "spectrum" ? "fₓ →" : "x →"}</span>}
+      {!interactive && <span className="axis-label">{kind.includes("spectrum") ? "fₓ →" : "x →"}</span>}
     </div>
   );
 }
@@ -323,15 +329,22 @@ export function VisualizationCard({
   detector?: string;
   selected?: boolean;
 }) {
-  const { source, preferences, notify } = useWorkspace();
+  const { source, preferences, notify, result } = useWorkspace();
   const [inspect, setInspect] = useState(false);
   const [zoom, setZoom] = useState(1);
   const exportRef = useRef<HTMLCanvasElement>(null);
-  const canView =
+  const computedUrl = resultImage(result, kind);
+  const dimensions = computedUrl && result ? result.analyzed_dimensions : source;
+  const canView = Boolean(computedUrl) || (
     source.kind === "demo"
       ? preferences.demoVisuals
-      : kind === "original" && source.kind === "image";
+      : kind === "original" && source.kind === "image");
   const save = () => {
+    if (computedUrl) {
+      downloadFile(computedUrl, `spectraedge-computed-${kind}.png`);
+      notify("Computed image exported.");
+      return;
+    }
     if (source.kind === "image" && kind === "original") {
       downloadFile(source.url, source.name);
       return;
@@ -354,6 +367,9 @@ export function VisualizationCard({
             )}
           </div>
           <div className="card-tools">
+            <IconButton label={`Download ${TITLES[kind].toLowerCase()}`} disabled={!computedUrl && !(source.kind === "image" && kind === "original")} onClick={save}>
+              <Download size={13} />
+            </IconButton>
             <IconButton
               label={`Inspect ${TITLES[kind].toLowerCase()}`}
               disabled={!canView}
@@ -376,12 +392,12 @@ export function VisualizationCard({
             </IconButton>
           </div>
         </header>
-        <VisualSurface key={source.url + kind} kind={kind} />
+        <VisualSurface key={(result?.request_id ?? source.url) + kind} kind={kind} />
         <footer className="instrument-footer">
           <span>{large ? source.name : DESCRIPTIONS[kind]}</span>
           <span>
-            {large
-              ? `${source.width} × ${source.height}`
+            {computedUrl || large
+              ? `${dimensions.width} × ${dimensions.height}${computedUrl ? " · analyzed" : ""}`
               : (detector ?? (source.kind === "demo" ? "DEMO" : "—"))}
           </span>
         </footer>
@@ -392,7 +408,7 @@ export function VisualizationCard({
           eyebrow={
             source.kind === "demo"
               ? "DEMO INSPECTOR · ILLUSTRATIVE DATA"
-              : "SOURCE INSPECTOR · LOCAL IMAGE"
+              : computedUrl ? "COMPUTED RESULT · PYTHON" : canView ? "SOURCE INSPECTOR · LOCAL IMAGE" : "NO CURRENT RESULT"
           }
           wide
           onClose={() => setInspect(false)}
@@ -418,14 +434,14 @@ export function VisualizationCard({
               <IconButton label="Fit to view" onClick={() => setZoom(1)}>
                 <Focus size={15} />
               </IconButton>
-              <button className="button" onClick={save}>
+              <button className="button" onClick={save} disabled={!canView}>
                 <Download size={13} />
                 Export image
               </button>
             </div>
           </div>
           <VisualSurface
-            key={source.url + kind + zoom}
+            key={(result?.request_id ?? source.url) + kind + zoom}
             kind={kind}
             zoom={zoom}
             interactive
@@ -437,7 +453,7 @@ export function VisualizationCard({
             <span>
               {source.kind === "demo"
                 ? "Static demo artwork · not a computed output"
-                : `${source.width} × ${source.height} pixels`}
+                : `${dimensions.width} × ${dimensions.height} pixels${computedUrl ? " · analyzed" : " · local preview"}`}
             </span>
           </div>
         </Modal>

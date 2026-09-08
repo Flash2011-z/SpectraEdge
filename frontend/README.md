@@ -1,63 +1,54 @@
 # SpectraEdge frontend
 
-SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System.
+The existing React/TypeScript/Vinext website now connects to the Python Gaussian/Fourier demonstration. Follow [the root README](../README.md) for exact Windows setup and two-terminal startup.
 
-This folder contains the complete browser interface for the university Signals and Linear Systems GUI prototype. The future Python processing service belongs in [../backend](../backend/README.md). The old desktop edition has been removed.
+Existing commands remain `npm run dev`, `npm run build`, and `npm start`. Use `npm.cmd` in Windows PowerShell if execution policy blocks npm.ps1. Requires Node.js 22.13+.
 
-## Run locally
+## Functionality
 
-Requires Node.js 22.13 or newer. You can also double-click `Start Website.cmd` in the project root, or run `npm run dev` there.
+- Upload/drag a File, change sigma/kernel settings, and Process with the real Python backend.
+- Original, grayscale, blurred, and before/after Fourier images are actual computed results. Dimensions, parameters used, and time come from the response.
+- Both spectra use one shared grayscale display scale, shown below their cards.
+- Inspect, expand, zoom, pan, and download images. Session export writes current metadata without embedding image bytes.
+- Parameter changes clear outdated results. Image changes, reset, and unmount abort and invalidate requests. Late successes/errors are ignored even if transport cancellation arrives too late.
+- Errors persist with a retry action; requests time out after 120 seconds.
+- Detector, threshold, object-area, and noise controls are disabled for real inputs. Detection is **not run**, not a zero-object result.
+- Compare and Live remain explicitly unfinished; no detector comparison or webcam processing runs.
+- The calibration example is separate and labelled illustrative, with processing disabled.
 
-To work directly from this frontend folder:
-
-```sh
-npm install
-npm run dev
-```
-
-Open the local URL printed in the terminal. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`.
-
-```sh
-npm run build
-npm start
-```
-
-## Current scope
-
-- Analyze, Compare, and Live are separate browser routes.
-- Local image selection, drag/drop, metadata, zoom, pan, and image export work.
-- Parameters, display preferences, and reduced motion are saved locally on the device.
-- All calibration images, edge/gradient/FFT artwork, object values, and comparison times are explicitly demo fixtures.
-- Process Image walks through the demo pipeline. Uploaded image outputs remain empty.
-- No edge detection, convolution, FFT, contour detection, camera capture, or machine-vision algorithms are implemented.
-- No image bytes are uploaded or saved in browser storage. Reloading discards the selected image.
-- The exported JSON file identifies all sample metrics as demo values.
+Only device preferences/settings persist in localStorage. Files, preview URLs, and results remain in session memory. Upload occurs only on Process, and Python does not save images. See [the API contract](../backend/README.md) for limits, preparation, encoding, and timing.
 
 ## Architecture
 
-- `app/`: Analyze, Compare, and Live routes and shared layout.
-- `components/workspace-provider.tsx`: shared session, input validation, local preferences, and preview lifecycle.
-- `components/workspace.tsx`: navigation, page orchestration, dialogs, shortcuts, session export.
-- `components/parameters.tsx`: analysis controls.
-- `components/visualization.tsx`: image cards, static demonstration renderer, inspector.
-- `components/object-information.tsx` and `pipeline.tsx`: reusable analysis instruments.
-- `lib/workspace.ts`: typed parameters, demo fixtures, and future backend result contract.
+- `lib/workspace.ts`: parameters, shared contract, Gaussian validation, result-to-card mapping, real stages, and separate demo fixtures.
+- `lib/api.ts`: configurable multipart adapter, response validation, timeout, AbortController, and generation-based stale-response protection.
+- `components/workspace-provider.tsx`: File/result lifecycle, parameter snapshots, and preferences. Every invalidating action cancels the request runner and clears results.
+- `components/workspace.tsx`: routes, result grid, loading/error/status UI, dialogs, shortcuts, and metadata export.
+- `components/visualization.tsx`: PNG/local preview, inspector, zoom/pan, downloads, and isolated illustrative renderer.
+- `components/parameters.tsx`: Gaussian controls and disabled planned controls.
+- `components/pipeline.tsx` and `object-information.tsx`: completed-stage and not-run displays.
 
-## Connecting the future Python backend
-
-The `AnalysisResult` interface defines `original_image`, `filtered_image`, `gx`, `gy`, `gradient_magnitude`, `edge_map`, `contour_image`, `fft_image`, `object_list`, `processing_time`, and `fps`.
-
-Add an HTTP API adapter when the processing phase begins. Keep a request identifier and parameter snapshot with each request so an outdated response cannot replace newer output. Return `provenance: "computed"` for real results. Use explicit busy, success, and error states. Replace demo rendering only when a validated result is available; never present demo fixtures as calculated output.
-
-Sites builds this React/TypeScript application with Vinext and Vite into a Workers-compatible deployment. The retained build scripts and `.openai/hosting.json` belong to that deployment workflow.
+`NEXT_PUBLIC_API_URL` defaults to `http://127.0.0.1:8000`. Copy `.env.example` to `.env.local` to change it; restart the frontend. This public configuration is not a secret. Align backend allowed origins if the website port changes.
 
 ## Checks
 
-```sh
-npm run lint
-npm run typecheck
-npm test
-npm run build
+```powershell
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run build
 ```
 
-The icon set is Lucide. The generated social card is in `public/og.png`.
+With Python running:
+
+```powershell
+npm.cmd run test:integration
+```
+
+Unit checks cover existing preferences/image validation, multipart construction, Gaussian settings, result contracts, errors, snapshots, and stale success/error cancellation. Live integration submits a real checkerboard PNG through the same adapter used by the workspace and checks sigma zero, positive smoothing, real spectra, dimensions, detection-not-run semantics, and a decode error. These Node/HTTP checks do not interact with a browser.
+
+## Ownership
+
+Frontend and signal_ops remain owned by the frontend/signal-operations contributor. The teammate takes over the initial API/dependencies/tests and future detection/pipeline work. Coordinate `ComputedAnalysisResult` and `parseAnalysisResult` updates when adding detector outputs; never relabel demo fixtures as results.
+
+Existing Vinext/Vite scripts, hosting configuration, icons, and social previews are retained. Local development does not publish a website or expose the Python service.

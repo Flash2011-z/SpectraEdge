@@ -1,28 +1,29 @@
 "use client";
 
 import { Check, ChevronRight } from "lucide-react";
-import { STAGES } from "@/lib/workspace";
+import { ANALYSIS_STAGES, STAGES } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 
 export function Pipeline() {
-  const { stage, setStage, busy } = useWorkspace();
+  const { stage, setStage, busy, source, result } = useWorkspace();
+  const stages = source.kind === "demo" ? STAGES : ANALYSIS_STAGES;
   return (
     <section className="pipeline" aria-label="Processing pipeline">
       <div className="pipeline-title">
         <span className="eyebrow">PROCESSING PIPELINE</span>
-        <span className="pipeline-description">{STAGES[stage].description}</span>
+        <span className="pipeline-description">{stages[stage].description}</span>
       </div>
       <div className="pipeline-nodes">
-        {STAGES.map((item, i) => (
+        {stages.map((item, i) => (
           <div className="pipeline-step" key={item.name}>
             <button
               onClick={() => setStage(i)}
-              disabled={busy}
+              disabled={busy || (source.kind !== "demo" && i >= 4)}
               className={stage === i ? "selected" : ""}
               aria-pressed={stage === i}
             >
               <span className="step-number">
-                {busy && stage > i ? <Check size={11} /> : `0${i + 1}`}
+                {result && i < 4 ? <Check size={11} /> : `0${i + 1}`}
               </span>
               <span className="step-text">
                 {item.name}

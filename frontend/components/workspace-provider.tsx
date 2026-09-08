@@ -13,21 +13,29 @@ import {
   DEFAULT_PARAMETERS,
   DEFAULT_PREFERENCES,
   DEMO_SOURCE,
+  EMPTY_SOURCE,
+  MAX_DECODED_PIXELS,
   restoreParameters,
   validateImage,
   type Parameters,
   type Preferences,
   type SourceImage,
+  type ComputedAnalysisResult,
 } from "@/lib/workspace";
+import { createAnalysisRunner } from "@/lib/api";
 
 function useWorkspaceState() {
   const [parameters, setParameters] = useState<Parameters>(DEFAULT_PARAMETERS);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
-  const [source, setSource] = useState<SourceImage>(DEMO_SOURCE);
+  const [source, setSource] = useState<SourceImage>(EMPTY_SOURCE);
+  const [file, setFile] = useState<File | null>(null);
+  const [result, setResult] = useState<ComputedAnalysisResult | null>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "outdated">("idle");
+  const [error, setError] = useState("");
+  const [requests] = useState(createAnalysisRunner);
   const [stage, setStage] = useState(0);
   const [selectedObject, setSelectedObject] = useState(3);
-  const [busy, setBusy] = useState(false);
-  const [previewed, setPreviewed] = useState(false);
+  const busy = status === "loading";
   const [loadingImage, setLoadingImage] = useState(false);
   const [notice, setNotice] = useState("");
   const [hydrated, setHydrated] = useState(false);
@@ -35,15 +43,14 @@ function useWorkspaceState() {
     () => document.getElementById("source-image-input")?.click(),
     [],
   );
-  const processTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const objectUrl = useRef("");
   const imageRequest = useRef(0);
-  const cancelPreview = useCallback(() => {
-    if (processTimer.current) clearInterval(processTimer.current);
-    processTimer.current = null;
-    setBusy(false);
-    setPreviewed(false);
-  }, []);
+  const invalidate = useCallback(() => {
+    requests.cancel();
+    setResult(null);
+    setError("");
+    setStatus((previous) => ["success", "loading", "outdated"].includes(previous) ? "outdated" : "idle");
+  }, [requests]);
   const notify = useCallback((message: string) => setNotice(message), []);
   useEffect(() => {
     try {
@@ -63,13 +70,13 @@ function useWorkspaceState() {
     }
     setHydrated(true);
     return () => {
-      if (processTimer.current) clearInterval(processTimer.current);
+      requests.cancel();
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       // This counter cancels decoding callbacks; it is not a rendered DOM ref.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       imageRequest.current++;
     };
-  }, []);
+  }, [requests]);
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -88,27 +95,31 @@ function useWorkspaceState() {
   }, [notice]);
   const updateParameter = useCallback(
     <K extends keyof Parameters>(key: K, value: Parameters[K]) => {
-      cancelPreview();
+      invalidate();
       setParameters((p) => ({ ...p, [key]: value }));
     },
-    [cancelPreview],
+    [invalidate],
   );
   const reset = useCallback(() => {
-    cancelPreview();
+    imageRequest.current++;
+    setLoadingImage(false);
+    invalidate();
     setParameters({ ...DEFAULT_PARAMETERS });
     setStage(0);
     notify("Parameters restored to defaults.");
-  }, [cancelPreview, notify]);
+  }, [invalidate, notify]);
   const loadDemo = useCallback(() => {
     imageRequest.current++;
     setLoadingImage(false);
-    cancelPreview();
+    invalidate();
+    setFile(null);
+    setStatus("idle");
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = "";
     setSource(DEMO_SOURCE);
     setStage(0);
     notify("Calibration demo loaded. All measurements are illustrative.");
-  }, [cancelPreview, notify]);
+  }, [invalidate, notify]);
   const loadImage = useCallback(
     (file?: File) => {
       if (!file) return;
@@ -117,7 +128,8 @@ function useWorkspaceState() {
         notify(invalid);
         return;
       }
-      cancelPreview();
+      invalidate();
+      setFile(null);
       const request = ++imageRequest.current;
       const url = URL.createObjectURL(file);
       const image = new Image();
@@ -127,10 +139,10 @@ function useWorkspaceState() {
           URL.revokeObjectURL(url);
           return;
         }
-        if (image.naturalWidth * image.naturalHeight > 80_000_000) {
+        if (image.naturalWidth * image.naturalHeight > MAX_DECODED_PIXELS) {
           URL.revokeObjectURL(url);
           setLoadingImage(false);
-          notify("Choose an image below 80 megapixels.");
+          notify("Choose an image at or below 20 megapixels.");
           return;
         }
         if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
@@ -142,9 +154,11 @@ function useWorkspaceState() {
           width: image.naturalWidth,
           height: image.naturalHeight,
         });
+        setFile(file);
+        setStatus("idle");
         setLoadingImage(false);
         setStage(0);
-        notify("Image opened locally. Processing will be available in the next phase.");
+        notify("Image ready. Process sends it to your configured Python backend; it is not saved.");
       };
       image.onerror = () => {
         URL.revokeObjectURL(url);
@@ -155,35 +169,28 @@ function useWorkspaceState() {
       };
       image.src = url;
     },
-    [cancelPreview, notify],
+    [invalidate, notify],
   );
   const process = useCallback(() => {
     if (busy || loadingImage) return;
-    if (source.kind !== "demo") {
-      notify(
-        "Image processing is not connected yet. Load the calibration demo to explore the pipeline.",
-      );
+    if (!file || source.kind !== "image") {
+      notify("Upload an image to run real Gaussian and Fourier analysis. The calibration example is illustrative only.");
       return;
     }
-    setBusy(true);
-    setPreviewed(false);
+    setStatus("loading");
+    setError("");
+    setResult(null);
     setStage(0);
-    let next = 0;
-    processTimer.current = setInterval(
-      () => {
-        next++;
-        setStage(Math.min(next, 5));
-        if (next >= 5) {
-          if (processTimer.current) clearInterval(processTimer.current);
-          processTimer.current = null;
-          setBusy(false);
-          setPreviewed(true);
-          notify("Demo walkthrough complete. Visuals and measurements are preset examples.");
-        }
+    void requests.run(file, { sigma: parameters.sigma, kernel_size: parameters.kernel }, {
+      success: (computed) => {
+        setResult(computed);
+        setStatus("success");
+        setStage(3);
+        notify("Gaussian and Fourier analysis complete. Detection has not run.");
       },
-      preferences.reducedMotion ? 20 : 180,
-    );
-  }, [busy, loadingImage, source.kind, preferences.reducedMotion, notify]);
+      error: (message) => { setStatus("error"); setError(message); },
+    });
+  }, [busy, loadingImage, file, source.kind, parameters, requests, notify]);
   return {
     parameters,
     preferences,
@@ -194,7 +201,10 @@ function useWorkspaceState() {
     selectedObject,
     setSelectedObject,
     busy,
-    previewed,
+    result,
+    status,
+    error,
+    canProcess: file !== null && !loadingImage && !busy,
     loadingImage,
     notice,
     notify,

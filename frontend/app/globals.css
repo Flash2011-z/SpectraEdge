@@ -1143,6 +1143,46 @@ select option {
 .workspace .output-grid {
   margin-top: 0;
 }
+.workspace .computed-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.computed-grid .instrument-header {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.computed-grid .instrument-header h2 {
+  white-space: normal;
+}
+.analysis-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 11px 14px;
+  border: 1px solid #25303d;
+  border-radius: 8px;
+  background: #111820;
+  color: #a6b8c8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.analysis-notice svg {
+  flex-shrink: 0;
+}
+.analysis-error {
+  border-color: #885b5b;
+  color: #ecc4c4;
+}
+.analysis-notice .text-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.spectrum-scale-note {
+  margin: 12px 0;
+  color: #8b9aad;
+  font-size: 12px;
+  line-height: 1.7;
+}
 .output-grid .instrument {
   display: flex;
   flex-direction: column;

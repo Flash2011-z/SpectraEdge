@@ -11,7 +11,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { useState } from "react";
-import { DETECTOR_DESCRIPTIONS, type Detector, type Parameters } from "@/lib/workspace";
+import { DETECTOR_DESCRIPTIONS, KERNEL_SIZES, type Detector, type Parameters } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 import { Help, RangeControl } from "./ui";
 
@@ -27,7 +27,10 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
     busy,
     reset,
     loadingImage,
+    canProcess,
   } = useWorkspace();
+  const unsupported = source.kind !== "demo";
+  const suggestedKernel = Math.max(3, 2 * Math.ceil(3 * p.sigma) + 1);
   const [dragging, setDragging] = useState(false);
   return (
     <aside
@@ -79,7 +82,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
         </div>
         <button className="text-button" onClick={loadDemo}>
           <FlaskConical size={12} />
-          Load calibration demo
+          Open illustrative example
         </button>
       </section>
       <section className="control-section">
@@ -93,13 +96,14 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.detector === name ? "selected" : ""}
               aria-pressed={p.detector === name}
+              disabled={unsupported}
               onClick={() => update("detector", name)}
             >
               {name}
             </button>
           ))}
         </div>
-        <p className="control-hint">{DETECTOR_DESCRIPTIONS[p.detector]}</p>
+        <p className="control-hint">{unsupported ? "Not implemented · detection will not run" : DETECTOR_DESCRIPTIONS[p.detector]}</p>
       </section>
       <section className="control-section">
         <h2>
@@ -124,7 +128,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               value={p.kernel}
               onChange={(e) => update("kernel", Number(e.target.value))}
             >
-              {[3, 5, 7].map((n) => (
+              {KERNEL_SIZES.map((n) => (
                 <option key={n} value={n}>
                   {n} × {n}
                 </option>
@@ -133,6 +137,12 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
             <ChevronDown size={12} aria-hidden="true" />
           </span>
         </div>
+        <p className="control-hint">
+          {p.sigma === 0 ? "Sigma 0 returns the grayscale image unchanged." : `Suggested support: ${suggestedKernel} × ${suggestedKernel} (about ±3σ).`}
+        </p>
+        {p.sigma > 0 && p.kernel !== suggestedKernel && (
+          <button className="text-button" onClick={() => update("kernel", suggestedKernel)}>Use suggested kernel</button>
+        )}
       </section>
       <section className="control-section">
         <h2>
@@ -145,6 +155,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           min={0}
           max={255}
           value={p.threshold}
+          disabled={unsupported}
           onChange={(v) => update("threshold", v)}
         />
         <RangeControl
@@ -155,6 +166,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           step={50}
           unit=" px²"
           value={p.minimumArea}
+          disabled={unsupported}
           onChange={(v) => update("minimumArea", v)}
         />
       </section>
@@ -172,6 +184,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.noise === name ? "selected" : ""}
               aria-pressed={p.noise === name}
+              disabled={unsupported}
               onClick={() => update("noise", name)}
             >
               {name}
@@ -185,21 +198,21 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           max={100}
           value={p.noiseStrength}
           unit="%"
-          disabled={p.noise === "None"}
+          disabled={unsupported || p.noise === "None"}
           onChange={(v) => update("noiseStrength", v)}
         />
       </details>
       <button
         className="button primary full process-button"
         onClick={process}
-        disabled={busy || loadingImage}
+        disabled={!canProcess}
       >
         {busy ? (
           <LoaderCircle size={14} className="spin" />
         ) : (
           <Play size={14} fill="currentColor" />
         )}{" "}
-        {busy ? "Walking through demo…" : "Process image"}
+        {busy ? "Processing in Python…" : "Process image"}
         {!busy && <kbd>Space</kbd>}
       </button>
       <button className="button subtle full" onClick={reset}>
@@ -208,7 +221,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
       </button>
       <div className="sidebar-foot">
         <span className="status-dot" />
-        Images stay in your browser.
+        Process sends to Python · memory only.
       </div>
     </aside>
   );

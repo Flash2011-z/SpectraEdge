@@ -15,13 +15,13 @@ export function ObjectInformation() {
           <span className="panel-index">07</span>
           <h2>Object information</h2>
         </div>
-        <span className="tag">{demo ? "DEMO VALUES" : "NO DATA"}</span>
+        <span className="tag">{demo ? "DEMO VALUES" : "NOT RUN"}</span>
       </header>
       <div className="object-body">
         <div className="object-overview">
           <div>
             <span className="object-count">{demo ? "04" : "—"}</span>
-            <span>objects detected</span>
+            <span>{demo ? "objects detected (example)" : "detection has not run"}</span>
           </div>
           <BoxSelect size={23} strokeWidth={1.2} />
         </div>
@@ -57,7 +57,7 @@ export function ObjectInformation() {
         </dl>
       </div>
       <footer className="instrument-footer">
-        <span>{demo ? "Select a contour to inspect" : "Load the demo to explore"}</span>
+        <span>{demo ? "Select a contour to inspect" : "Reserved for the detection milestone"}</span>
         <ArrowUpRight size={11} />
       </footer>
     </section>
