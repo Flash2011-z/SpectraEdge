@@ -21,6 +21,7 @@ from starlette.formparsers import MultiPartException, MultiPartParser
 
 from backend.signal_ops import fft_spectrum, gaussian_blur
 from backend.detection import sobel, threshold_edges
+from backend.cutout_api import create_cutout_router
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
@@ -44,6 +45,7 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+app.include_router(create_cutout_router(ALLOWED_ORIGINS))
 
 
 class AnalyzeForm(BaseModel):

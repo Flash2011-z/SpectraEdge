@@ -1,7 +1,11 @@
 // Explicit live HTTP check: start the Python service before running test:integration.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { analyzeImage } from "../lib/api.ts";
+import { extractCutout, prepareCutout } from "../lib/cutout-api.ts";
+import { photoFile, rectangle } from "./cutout-fixture.ts";
+import { AI_MODEL, resolveCutoutRectangle } from "../lib/cutout.ts";
 
 const pixels = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAAAAAC+OKDoAAAAJklEQVR4nGNkYPjPwIgHMzEQAv//48cETWAcdQMYjIYDBAyGcAAAxx2Pub9i5ZMAAAAASUVORK5CYII=", "base64");
 const file = new File([pixels], "fine-detail.png", { type: "image/png" });
@@ -42,4 +46,65 @@ test("real Sobel upload returns gradients and changing only threshold changes ed
   assert.equal(weak.object_list, null);
   assert.equal(weak.fps, null);
   console.log(`Actual Python Sobel processing: threshold=0 ${weak.processing_time} ms; threshold=1443 ${strong.processing_time} ms.`);
+});
+
+test("actual cutout preparation/extraction and brush refinement work over HTTP", async () => {
+  const prepared = await prepareCutout(photoFile, crypto.randomUUID(), new AbortController().signal);
+  assert.deepEqual({ width: prepared.width, height: prepared.height }, { width: 16, height: 12 });
+  const original = await extractCutout({ prepared, rectangle, marks: [], settings: { method: "grabcut" } }, crypto.randomUUID(), new AbortController().signal);
+  assert.deepEqual(original.foreground_bounds, { x: 4, y: 3, width: 8, height: 6 });
+  const refined = await extractCutout({ prepared, rectangle, settings: { method: "grabcut" }, marks: [
+    { mode: "keep", size: 1, points: [{ x: 8, y: 6 }] },
+    { mode: "keep", size: 1, points: [{ x: 0, y: 0 }] },
+  ] }, crypto.randomUUID(), new AbortController().signal);
+  assert.notEqual(refined.cutout_image, original.cutout_image);
+  assert.equal(refined.foreground_bounds.x, 0);
+  assert.equal(refined.foreground_bounds.y, 0);
+  assert.equal(refined.image_id, prepared.image_id);
+  console.log(`Actual GrabCut: ${original.processing_time} ms; refined ${refined.processing_time} ms.`);
+});
+
+test("brush-free edge extraction, optional refinement and comparison work over HTTP", async () => {
+  const prepared = await prepareCutout(photoFile, crypto.randomUUID(), new AbortController().signal);
+  const settings = { method: "edge-watershed" as const, sigma: 0, kernel_size: 5 };
+  const marks = [{ mode: "keep" as const, size: 1, points: [{ x: 8, y: 6 }] }];
+  const extract = (sigma: number) => extractCutout({ prepared, rectangle, marks, settings: { ...settings, sigma } }, crypto.randomUUID(), new AbortController().signal);
+  const automatic = await extractCutout({ prepared, rectangle, marks: [], settings }, crypto.randomUUID(), new AbortController().signal);
+  assert.equal(automatic.seed_mode, "automatic");
+  assert.equal(automatic.method, "edge-watershed");
+  const original = await extract(0);
+  const smoothed = await extract(1.2);
+  assert.equal(original.method, "edge-watershed");
+  assert.equal(original.seed_mode, "brush");
+  assert.equal(original.algorithm, "skimage-watershed");
+  assert.deepEqual(smoothed.parameters_used, { sigma: 1.2, kernel_size: 5 });
+  assert.notEqual(original.guidance_image, smoothed.guidance_image);
+  assert.deepEqual({ width: original.width, height: original.height }, { width: 16, height: 12 });
+  const comparison = await extractCutout({ prepared, rectangle, marks, settings: { method: "grabcut" } }, crypto.randomUUID(), new AbortController().signal);
+  assert.equal(comparison.method, "grabcut");
+  assert.equal(comparison.guidance_image, null);
+  assert.deepEqual(comparison.parameters_used, {});
+  console.log(`Actual watershed: sigma=0 ${original.processing_time} ms; sigma=1.2 ${smoothed.processing_time} ms.`);
+});
+
+test("optional real AI photo uses local model and exact prepared grid over HTTP", {
+  skip: !process.env.SPECTRAEDGE_TEST_AI_PHOTO,
+  timeout: 180_000,
+}, async () => {
+  const bytes = await readFile(process.env.SPECTRAEDGE_TEST_AI_PHOTO!);
+  const photo = new File([bytes], "local-portrait.jpg", { type: "image/jpeg" });
+  const signal = AbortSignal.timeout(170_000);
+  const prepared = await prepareCutout(photo, crypto.randomUUID(), signal);
+  const output = await extractCutout({ prepared, rectangle: resolveCutoutRectangle(prepared, null, "ai-assisted")!,
+    marks: [], settings: { method: "ai-assisted" } }, crypto.randomUUID(), signal);
+  assert.equal(output.method, "ai-assisted");
+  assert.equal(output.algorithm, "rembg-onnx");
+  assert.deepEqual(output.parameters_used, { model: AI_MODEL });
+  assert.equal(output.guidance_image, null);
+  assert.equal(output.seed_mode, null);
+  assert.equal(output.width, prepared.width);
+  assert.equal(output.height, prepared.height);
+  assert.ok(output.foreground_bounds.width > prepared.width / 4);
+  assert.ok(output.foreground_bounds.height > prepared.height / 4);
+  console.log(`Actual optional AI: ${output.processing_time} ms; ${output.width} x ${output.height}.`);
 });

@@ -2,7 +2,14 @@
 
 FastAPI service for the existing manual Gaussian/Fourier modules plus manual Sobel and basic thresholding. No Prewitt, Laplacian, contours, object analysis, noise experiments, or complete future pipeline are implemented.
 
+**[Object Cutout](../docs/OBJECT_CUTOUT.md)** exposes `/cutout/prepare` and `/cutout/extract`. Manual Gaussian/Sobel produce the elevation for scikit-image watershed; OpenCV GrabCut remains a comparison method. Reinstall requirements and restart Python. Its 512-pixel RGBA preparation, markers, method/parameter provenance and guidance contract are documented separately from the unchanged `/analyze` contract below. FFT remains analysis-only.
+
 ## Run
+
+**Optional AI:** [AI-assisted cutout](../docs/AI_CUTOUT.md) is a third explicit
+method, with separate `requirements-ai.txt` and photo-free model setup. Base
+requirements and the manual mathematics are unchanged. Optional libraries and
+the cached model load only on an explicit AI extraction, never during app startup.
 
 Follow [the root README](../README.md) for dependency installation and two-terminal startup. Python 3.12+ is required. From the project root:
 

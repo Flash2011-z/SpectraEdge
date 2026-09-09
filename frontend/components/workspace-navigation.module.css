@@ -1,0 +1,30 @@
+@media (max-width: 1000px) {
+  :global(.topbar) .navigation {
+    gap: 4px;
+  }
+  .navigation :global(.nav-link) {
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 760px) {
+  :global(.topbar) .navigation {
+    gap: 0;
+  }
+  .navigation :global(.nav-link) {
+    padding: 0 4px;
+    gap: 4px;
+    font-size: 10px;
+  }
+  .navigation :global(.nav-link.active)::after {
+    left: 5px;
+    right: 5px;
+  }
+}
+
+@media (max-width: 400px) {
+  .navigation svg {
+    display: none;
+  }
+}

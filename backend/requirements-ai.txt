@@ -1,0 +1,4 @@
+# Optional local AI cutout. The base backend does not require these packages.
+-r requirements.txt
+rembg[cpu]==2.0.84
+onnxruntime==1.29.0

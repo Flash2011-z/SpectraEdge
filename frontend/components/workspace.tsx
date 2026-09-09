@@ -11,13 +11,11 @@ import {
   CircleHelp,
   Cpu,
   FlaskConical,
-  GitCompareArrows,
   Info,
   Keyboard,
   LoaderCircle,
   LockKeyhole,
   Play,
-  Radio,
   ScanLine,
   Settings2,
   ShieldCheck,
@@ -38,6 +36,7 @@ import { VisualizationCard } from "./visualization";
 import { ObjectInformation } from "./object-information";
 import { Pipeline } from "./pipeline";
 import { downloadJson, IconButton, Modal } from "./ui";
+import { WorkspaceBrand, WorkspaceNavigation } from "./workspace-navigation";
 
 const PAGE_COPY = {
   analyze: {
@@ -409,32 +408,8 @@ export default function Workspace({ view }: { view: View }) {
         Skip to workspace
       </a>
       <header className="topbar">
-        <Link className="brand" href="/">
-          <span className="brand-mark">
-            <Activity size={23} strokeWidth={1.5} />
-          </span>
-          <strong>
-            Spectra<span>Edge</span>
-          </strong>
-          <span className="version">WEB / 01</span>
-        </Link>
-        <nav aria-label="Workspace">
-          {[
-            { view: "analyze", path: "/", label: "Analyze", icon: ScanLine },
-            { view: "compare", path: "/compare", label: "Compare", icon: GitCompareArrows },
-            { view: "live", path: "/live", label: "Live", icon: Radio },
-          ].map(({ view: page, path, label, icon: Icon }) => (
-            <Link
-              key={page}
-              className={`nav-link ${view === page ? "active" : ""}`}
-              href={path}
-              aria-current={view === page ? "page" : undefined}
-            >
-              <Icon size={14} strokeWidth={1.6} />
-              {label}
-            </Link>
-          ))}
-        </nav>
+        <WorkspaceBrand />
+        <WorkspaceNavigation active={view} />
         <div className="top-actions">
           <span className="mode-label">
             <i />

@@ -11,7 +11,7 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit --incremental false",
-    "test": "node --test tests/workspace.test.ts tests/api.test.ts",
+    "test": "node --test tests/workspace.test.ts tests/api.test.ts tests/cutout.test.ts",
     "test:integration": "node --test tests/integration.test.ts"
   },
   "dependencies": {

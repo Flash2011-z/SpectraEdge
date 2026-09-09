@@ -4,7 +4,14 @@
 
 A two-person CSE 220 project. The website demonstrates actual Python grayscale preparation, manual Gaussian convolution, **manual Sobel gradients and adjustable thresholding**, and manual Fourier analysis. Prewitt, Laplacian, contours, object measurements, noise experiments, multi-scale processing, detector comparison, and webcam processing are **not implemented**.
 
+**[Object Cutout](docs/OBJECT_CUTOUT.md)** at `/cutout` defaults to manual Gaussian/Sobel elevation driving library-backed watershed. Draw a rectangle with a background margin and extract directly: starting regions use the dominant background colour and low-gradient interiors. Best with a fairly uniform background; the object may touch the photo edge. Keep/Remove brushes are optional corrections. Inspect edge guidance and download a transparent PNG. OpenCV GrabCut remains a separate comparison method; FFT is not used for cutout. Photos are prepared at up to 512 pixels per side before selection. Install `backend/requirements.txt` in the existing virtual environment and restart Python after backend changes.
+
 ## Windows setup and startup
+
+Optional: [AI-assisted cutout setup](docs/AI_CUTOUT.md) adds a user-selected local
+portrait model. It is never required by Analyze, manual watershed or GrabCut.
+Install `backend/requirements-ai.txt` and run `python -m backend.prepare_ai` with
+the backend virtual environment only if AI is wanted. Manual mode stays default.
 
 Requires Python 3.12+ and Node.js 22.13+. Tested with Python 3.14.5. Run from `D:\SpectraEdge`.
 

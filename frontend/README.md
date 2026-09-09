@@ -2,9 +2,17 @@
 
 The React/TypeScript/Vinext website connects to Python Gaussian, Sobel/threshold, and Fourier analysis. Follow [the root README](../README.md) for exact Windows setup, two-terminal startup, and a teacher demonstration.
 
+**[Object Cutout](../docs/OBJECT_CUTOUT.md)** at `/cutout` defaults to Edge-guided watershed, with Gaussian controls and a preview of manual Sobel elevation. Draw a rectangle with background around the object and extract without painting. Brushes are optional corrections; Clear marks returns to automatic selection. GrabCut remains a comparison. Method/parameter or selection changes invalidate downloads. Upload prepares the photo in Python at up to 512 pixels per side before drawing. State is isolated from Analyze, in memory only, and discarded on leaving. No frontend dependency was added.
+
 Existing commands remain `npm run dev`, `npm run build`, and `npm start`. Use `npm.cmd` in Windows PowerShell if execution policy blocks npm.ps1. Requires Node.js 22.13+.
 
 ## Functionality
+
+Object Cutout also offers **AI-assisted cutout — optional**, backed by a local
+pretrained portrait model. Manual watershed remains default. AI can start on the
+whole photo without a drawn box; its result is explicitly labelled, Gaussian and
+edge-guidance controls are unavailable, and brushes directly edit opacity.
+Missing AI setup never triggers a fallback. See [setup and scope](../docs/AI_CUTOUT.md).
 
 - Upload/drag a File, change sigma/kernel/threshold settings, and Process with the real Python backend and Sobel detector.
 - Original, grayscale, blurred, Gx, Gy, magnitude, edges, and before/after Fourier images are actual computed results. Dimensions, parameters used, and time come from the response.
