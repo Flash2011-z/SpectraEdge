@@ -2,7 +2,7 @@
 
 **SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System**
 
-A two-person CSE 220 project. The website now demonstrates actual Python grayscale preparation, manual Gaussian convolution, and manual Fourier analysis. Detection, contours, noise experiments, detector comparison, and webcam processing are **not implemented**.
+A two-person CSE 220 project. The website demonstrates actual Python grayscale preparation, manual Gaussian convolution, **manual Sobel gradients and adjustable thresholding**, and manual Fourier analysis. Prewitt, Laplacian, contours, object measurements, noise experiments, multi-scale processing, detector comparison, and webcam processing are **not implemented**.
 
 ## Windows setup and startup
 
@@ -50,14 +50,34 @@ Keep this demonstration bound to loopback; it is not an authenticated public upl
 ## Teacher demonstration
 
 1. Open Analyze and upload an image containing fine detail. Initially the large panel shows its local original.
-2. Set sigma to **0**, select a kernel, and click **Process image**. Grayscale and Gaussian-blurred images should match, as should both spectra.
-3. Set sigma to **2** and click **Use suggested kernel** (13 × 13). Old results disappear and the workspace asks you to process again.
-4. Process again. Expand the blurred image and compare both spectra. Fine detail is reduced; both spectra use the displayed shared scale.
-5. Point out the actual **analyzed dimensions**, **processing time**, and completed stages. Detection and object measurements are explicitly **not run**.
+2. Keep **Sobel**, sigma **1.2**, and threshold **96**; use the suggested Gaussian kernel and click **Process image**.
+3. Inspect the blur, signed Gx/Gy, gradient magnitude, and edge map. Gx is positive toward brighter pixels on the right; Gy is positive toward brighter pixels below. Gray in a derivative image means zero, not a medium-strength edge.
+4. Keep the same image, sigma, and kernel. Increase threshold to **200**, then **500**, processing after each change. Weaker edges disappear; no new edge pixels can be added. At **1443**, none remain. The precise pattern depends on the image.
+5. Point out the actual **analyzed dimensions**, **processing time**, and completed stages. Status says **edges computed**, while objects remain **unavailable**, not zero.
 6. Download a computed PNG from a card/inspector. Export session downloads actual metadata, without image bytes.
 7. Change settings while processing or reset: outdated responses are ignored. Stop Python and Process to demonstrate an actionable connection error; restart it and retry.
 
 The **Illustrative example** is separate, labelled artwork with preset object values. Its Process button is disabled; it is not a calculated detector result.
+
+For a smoothing comparison, set sigma to **0** and process: grayscale/blur and both spectra match. Then set sigma to **2**, use the suggested 13 × 13 kernel, and process again. Compare the Fourier pair on its shared scale. Changing sigma changes the gradient signal too, so hold it fixed when demonstrating threshold alone.
+
+### Mathematics to explain
+
+`convolve2d()` flips each kernel once and uses reflection padding. The convolution kernels are:
+
+```text
+Kx = [ 1  0 -1 ]       Ky = [ 1  2  1 ]
+     [ 2  0 -2 ]            [ 0  0  0 ]
+     [ 1  0 -1 ]            [-1 -2 -1 ]
+```
+
+After flipping, Gx is the weighted right-minus-left difference, and Gy is bottom-minus-top. For a unit horizontal ramp, Gx is `(1+2+1) × (right-left) = 4 × 2 = 8` inside the image, while Gy is zero. A vertical 0-to-255 step gives Gx=1020 at the two adjacent columns; reversing the step gives −1020. Reflection makes the outermost derivative zero along the reflected axis.
+
+Magnitude is `sqrt(Gx² + Gy²)`: the strength of change regardless of direction or sign. For Gx=24 and Gy=−32, magnitude is 40. An edge is white (255) only if **raw magnitude > threshold**; equality is black. Thresholding selects pixels, not objects or contours, and does not thin edges.
+
+Both Sobel kernels sum to zero. The Sobel module subtracts one constant brightness offset before convolution, an equivalent operation that prevents floating-point roundoff from turning a flat Gaussian output into edges at threshold zero. It does not clip weak gradients or introduce a tolerance.
+
+Raw derivatives remain signed floats and can exceed 255. Display PNGs are separate: Gx/Gy map −1020…1020 to black…white (zero rounds to gray 128); magnitude maps 0…`1020 × sqrt(2)` to black…white. These fixed scales never affect thresholding. Gaussian smoothing reduces rapid variations before differentiation; both Fourier calculations still use the original grayscale and the same floating-point smoothed array.
 
 ## Data and calculation boundaries
 
@@ -65,7 +85,7 @@ The **Illustrative example** is separate, labelled artwork with preset object va
 - Uploads and results stay in memory. The server saves no images or result history. Reloading discards session images/results; only device preferences/settings persist.
 - Limits: 20 MiB per file, 20 million decoded pixels, one image per request. The preview fits within **512 × 512**, preserves aspect ratio, and is never upscaled.
 - EXIF orientation is applied, transparency is composited on white, and animated images use frame zero. Nearest-neighbour preview resizing can alias very fine detail; analyzed dimensions are always shown.
-- Gaussian and Fourier calculations use the existing manual `signal_ops` modules. Quantization is confined to PNG encoding. Both spectra use one combined maximum.
+- Gaussian and Fourier calculations use the unchanged manual `signal_ops` modules. Sobel reuses manual convolution; thresholding uses raw magnitudes. Only binary decisions and display PNGs become uint8. Both spectra use one combined maximum.
 - Browser cancellation prevents stale results but cannot interrupt a Python calculation already running. One calculation runs at a time; overlap receives a retryable busy response.
 
 ## Checks
@@ -74,6 +94,7 @@ From the project root:
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests/signal_ops -p "test_*.py" -v
+.\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests/detection -p "test_*.py" -v
 .\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests -p "test_api.py" -v
 npm.cmd run check
 npm.cmd run build
@@ -91,7 +112,8 @@ This checks real PNG uploads and errors, but is not a browser interaction test. 
 
 - `frontend/`: React/TypeScript website, API adapter, shared result/request state, and tests. Owned by the frontend/signal-operations contributor.
 - `backend/signal_ops/` and its tests: existing array-only convolution, Gaussian, DFT, and FFT modules. Same owner; no algorithm duplication in the API.
-- `backend/app.py`, `backend/requirements.txt`, and `backend/tests/test_api.py`: initial API setup created in this milestone; **hand off to the teammate for future API/pipeline development**.
-- Future detectors, contours, noise experiments, multi-scale processing, complete pipeline, and camera processing belong to the teammate.
+- `backend/detection/sobel.py`, `threshold.py`, and their tests: Sobel/basic threshold milestone completed by the frontend/signal-operations contributor. Array-only imports: `from backend.detection import sobel, threshold_edges`.
+- `backend/app.py` and `backend/tests/test_api.py`: extended for this milestone; **hand off to the teammate for remaining API/pipeline development**. Existing dependency files are unchanged.
+- Prewitt, Laplacian, contours, object measurements, noise experiments, multi-scale processing, remaining pipeline, and camera work belong to the teammate. Coordinate future API contract changes through the frontend owner; do not edit the frontend independently.
 
 See [backend/README.md](backend/README.md) for the multipart/JSON contract and [frontend/README.md](frontend/README.md) for integration details. This remains one Git repository. No automatic commits, pushes, or deployments.

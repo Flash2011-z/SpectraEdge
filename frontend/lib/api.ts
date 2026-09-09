@@ -1,4 +1,4 @@
-import { validateGaussian, type ComputedAnalysisResult, type GaussianSettings } from "./workspace.ts";
+import { validateAnalysis, type ComputedAnalysisResult, type AnalysisSettings } from "./workspace.ts";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -13,28 +13,35 @@ export function parseAnalysisResult(value: unknown, requestId: string): Computed
       ![result.original_image, result.grayscale_image, result.filtered_image,
         result.fft_image, result.filtered_fft_image].every(png) ||
       !dimensions(result.analyzed_dimensions, 512) || !dimensions(result.source_dimensions, 20_000_000) ||
-      !result.parameters_used || validateGaussian(result.parameters_used) ||
+      !result.parameters_used || validateAnalysis(result.parameters_used) ||
       !Number.isFinite(result.processing_time) || result.processing_time < 0 ||
-      result.detection_status !== "not_run" ||
-      ![result.gx, result.gy, result.edge_map, result.gradient_magnitude,
-        result.contour_image, result.object_list, result.fps].every((field) => field === null) ||
+      ![result.contour_image, result.object_list, result.fps].every((field) => field === null) ||
       !Array.isArray(result.completed_stages) ||
-      result.completed_stages.join(",") !== "input,grayscale,smooth,fourier" ||
       result.spectrum_scale?.min !== 0 || !Number.isFinite(result.spectrum_scale?.max) ||
       result.spectrum_scale.max < 0 || result.spectrum_scale.mapping !== "linear_grayscale") return fail();
+  const derivatives = [result.gx, result.gy, result.gradient_magnitude, result.edge_map];
+  if (result.parameters_used.detector === "Sobel") {
+    if (result.detection_status !== "edges_computed" || !derivatives.every(png) ||
+        result.completed_stages.join(",") !== "input,grayscale,smooth,sobel,threshold,fourier") return fail();
+  } else if (result.detection_status !== "not_run" || !derivatives.every((field) => field === null) ||
+      result.completed_stages.join(",") !== "input,grayscale,smooth,fourier") return fail();
   return result;
 }
 
 export async function analyzeImage(
-  file: File, settings: GaussianSettings, requestId: string, signal: AbortSignal,
+  file: File, settings: AnalysisSettings, requestId: string, signal: AbortSignal,
 ): Promise<ComputedAnalysisResult> {
-  const invalid = validateGaussian(settings);
+  const invalid = validateAnalysis(settings);
   if (invalid) throw new Error(invalid);
   const body = new FormData();
   body.append("image", file);
   body.append("sigma", String(settings.sigma));
   body.append("kernel_size", String(settings.kernel_size));
   body.append("request_id", requestId);
+  if (settings.detector === "Sobel") {
+    body.append("detector", settings.detector);
+    body.append("threshold", String(settings.threshold));
+  }
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/analyze`, { method: "POST", body, signal });
@@ -48,7 +55,8 @@ export async function analyzeImage(
     throw new Error(typeof detail === "string" ? detail : `Analysis failed (HTTP ${response.status}). Check the backend terminal and retry.`);
   }
   const result = parseAnalysisResult(data, requestId);
-  if (result.parameters_used.sigma !== settings.sigma || result.parameters_used.kernel_size !== settings.kernel_size)
+  if (result.parameters_used.sigma !== settings.sigma || result.parameters_used.kernel_size !== settings.kernel_size ||
+      result.parameters_used.detector !== settings.detector || result.parameters_used.threshold !== settings.threshold)
     throw new Error("The backend used different settings. Results were discarded; please retry.");
   return result;
 }
@@ -61,7 +69,7 @@ export function createAnalysisRunner(send = analyzeImage) {
   const cancel = () => { generation++; controller?.abort(); controller = null; };
   return {
     cancel,
-    async run(file: File, settings: GaussianSettings, callbacks: {
+    async run(file: File, settings: AnalysisSettings, callbacks: {
       success: (result: ComputedAnalysisResult) => void;
       error: (message: string) => void;
     }) {

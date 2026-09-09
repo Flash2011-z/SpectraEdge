@@ -12,6 +12,7 @@ from PIL import Image
 
 from backend import app as api
 from backend.signal_ops import fft_spectrum, gaussian_blur
+from backend.detection import sobel, threshold_edges
 
 REQUEST_ID = "12345678-1234-1234-1234-123456789abc"
 
@@ -74,6 +75,92 @@ class AnalyzeAPITests(unittest.IsolatedAsyncioTestCase):
         result = (await self.upload(sigma="0")).json()
         self.assertEqual(result["filtered_image"], result["grayscale_image"])
         self.assertEqual(result["fft_image"], result["filtered_fft_image"])
+
+    async def test_sobel_uses_same_float_filtered_signal_and_returns_actual_outputs(self):
+        filtered = gaussian_blur(self.detail, 1.2, 7)
+        with patch.object(api, "gaussian_blur", return_value=filtered):
+            with patch.object(api, "sobel", wraps=sobel) as detector:
+                with patch.object(api, "fft_spectrum", wraps=fft_spectrum) as spectrum:
+                    response = await self.upload(detector="Sobel", threshold="96")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIs(detector.call_args.args[0], filtered)
+        self.assertIs(spectrum.call_args_list[1].args[0], filtered)
+        self.assertEqual(spectrum.call_count, 2)
+        result = response.json()
+        self.assertEqual(result["detection_status"], "edges_computed")
+        self.assertEqual(result["parameters_used"], {"sigma": 1.2, "kernel_size": 7, "detector": "Sobel", "threshold": 96})
+        self.assertEqual(result["completed_stages"], ["input", "grayscale", "smooth", "sobel", "threshold", "fourier"])
+        self.assertEqual(result["request_id"], REQUEST_ID)
+        for key in ("contour_image", "object_list", "fps"):
+            self.assertIsNone(result[key])
+        gx, gy, magnitude = sobel(filtered)
+        expected = {
+            "gx": (gx / 1020 + 1) * 127.5,
+            "gy": (gy / 1020 + 1) * 127.5,
+            "gradient_magnitude": magnitude / (1020 * np.sqrt(2)) * 255,
+            "edge_map": threshold_edges(magnitude, 96),
+        }
+        for field, values in expected.items():
+            np.testing.assert_array_equal(decoded_png(result[field]), np.rint(values).astype(np.uint8))
+        gaussian_only = (await self.upload()).json()
+        for field in ("original_image", "grayscale_image", "filtered_image", "fft_image", "filtered_fft_image", "spectrum_scale", "analyzed_dimensions"):
+            self.assertEqual(result[field], gaussian_only[field])
+
+    async def test_known_step_has_fixed_signed_and_magnitude_display_scales(self):
+        for row, expected in (([0, 0, 255, 255, 255], 255), ([255, 255, 0, 0, 0], 0)):
+            result = (await self.upload(png_bytes(np.tile(row, (3, 1))), sigma="0", detector="Sobel", threshold="96")).json()
+            np.testing.assert_array_equal(decoded_png(result["gx"]), np.tile([128, expected, expected, 128, 128], (3, 1)))
+            np.testing.assert_array_equal(decoded_png(result["gy"]), np.full((3, 5), 128))
+            # 1020/(1020*sqrt(2))*255 rounds to 180, not per-image white.
+            np.testing.assert_array_equal(decoded_png(result["gradient_magnitude"]), np.tile([0, 180, 180, 0, 0], (3, 1)))
+            np.testing.assert_array_equal(decoded_png(result["edge_map"]), np.tile([0, 255, 255, 0, 0], (3, 1)))
+
+    async def test_flat_sobel_image_has_no_edges_even_at_zero_threshold(self):
+        for sigma in ("0", "1.2"):
+            result = (await self.upload(png_bytes(np.full((5, 7), 123)), sigma=sigma, detector="Sobel", threshold="0")).json()
+            np.testing.assert_array_equal(decoded_png(result["edge_map"]), np.zeros((5, 7)))
+            np.testing.assert_array_equal(decoded_png(result["gradient_magnitude"]), np.zeros((5, 7)))
+
+    async def test_raw_threshold_equality_and_monotonic_selection(self):
+        payload = png_bytes(np.tile([0, 0, 255, 255, 255], (3, 1)))
+        previous = np.ones((3, 5), dtype=bool)
+        for threshold in (0, 96, 1019, 1020, 1443):
+            result = (await self.upload(payload, sigma="0", detector="Sobel", threshold=str(threshold))).json()
+            selected = decoded_png(result["edge_map"]) != 0
+            self.assertFalse(np.any(selected & ~previous))
+            self.assertEqual(int(selected.sum()), 6 if threshold < 1020 else 0)
+            previous = selected
+
+    async def test_invalid_or_incomplete_detection_settings(self):
+        cases = [{"detector": name, "threshold": "96"} for name in ("Prewitt", "Laplacian", "sobel", "", "unknown")]
+        cases += [{"detector": "Sobel", "threshold": value} for value in ("-1", "1443.1", "nan", "inf", "true", "abc", "")]
+        cases += [{"detector": "Sobel"}, {"threshold": "96"}]
+        for parameters in cases:
+            with self.subTest(parameters=parameters):
+                response = await self.upload(**parameters)
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertIsInstance(response.json()["detail"], str)
+                self.assertTrue(any(name in response.json()["detail"] for name in ("detector", "threshold")))
+        self.assertEqual((await self.upload(detector="Sobel", threshold="96.5")).status_code, 200)
+
+    async def test_extended_multipart_rejects_duplicates_unknown_fields_and_extra_files(self):
+        fields = [("image", ("a.png", png_bytes(self.detail), "image/png")),
+                  ("sigma", (None, "0")), ("kernel_size", (None, "3")),
+                  ("request_id", (None, REQUEST_ID))]
+        for extra, expected in (([("sigma", (None, "1"))], 422),
+                                ([("unexpected", (None, "1"))], 422),
+                                ([("image", ("b.png", png_bytes(self.detail)))], 400),
+                                ([("detector", (None, "Sobel")), ("threshold", (None, "96")), ("extra", (None, "1"))], 400)):
+            response = await self.client.post("/analyze", files=fields + extra)
+            self.assertEqual(response.status_code, expected, response.text)
+
+    async def test_sobel_upload_retains_size_limit_and_openapi_contract(self):
+        with patch.object(api, "MAX_REQUEST_BYTES", 100):
+            self.assertEqual((await self.upload(detector="Sobel", threshold="96")).status_code, 413)
+        schema = api.app.openapi()["paths"]["/analyze"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+        self.assertEqual(set(schema["required"]), {"image", "sigma", "kernel_size", "request_id"})
+        self.assertEqual(schema["properties"]["detector"]["enum"], ["Sobel"])
+        self.assertEqual(schema["properties"]["threshold"]["maximum"], 1443)
 
     async def test_kernel_choice_affects_actual_blur(self):
         small = (await self.upload(kernel_size="3", sigma="2")).json()

@@ -11,7 +11,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { useState } from "react";
-import { DETECTOR_DESCRIPTIONS, KERNEL_SIZES, type Detector, type Parameters } from "@/lib/workspace";
+import { KERNEL_SIZES, MAX_THRESHOLD, type Detector, type Parameters } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 import { Help, RangeControl } from "./ui";
 
@@ -29,7 +29,6 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
     loadingImage,
     canProcess,
   } = useWorkspace();
-  const unsupported = source.kind !== "demo";
   const suggestedKernel = Math.max(3, 2 * Math.ceil(3 * p.sigma) + 1);
   const [dragging, setDragging] = useState(false);
   return (
@@ -96,14 +95,14 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.detector === name ? "selected" : ""}
               aria-pressed={p.detector === name}
-              disabled={unsupported}
+              disabled={name !== "Sobel"}
               onClick={() => update("detector", name)}
             >
               {name}
             </button>
           ))}
         </div>
-        <p className="control-hint">{unsupported ? "Not implemented · detection will not run" : DETECTOR_DESCRIPTIONS[p.detector]}</p>
+        <p className="control-hint">Manual Sobel · Prewitt and Laplacian are not implemented.</p>
       </section>
       <section className="control-section">
         <h2>
@@ -151,13 +150,14 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
         </h2>
         <RangeControl
           label="Threshold"
-          help="The future detection stage will reject gradient magnitudes below this threshold."
+          help="Raw Sobel magnitude units, not normalized brightness. A pixel is an edge only when sqrt(Gx² + Gy²) is strictly greater than this value."
           min={0}
-          max={255}
+          max={MAX_THRESHOLD}
           value={p.threshold}
-          disabled={unsupported}
+          disabled={source.kind !== "image"}
           onChange={(v) => update("threshold", v)}
         />
+        <p className="control-hint">Raw magnitude &gt; threshold · 0–1443. Higher values keep stronger edges. Process again after changing it.</p>
         <RangeControl
           label="Minimum area"
           help="Contours with a smaller enclosed area will be ignored."
@@ -166,7 +166,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           step={50}
           unit=" px²"
           value={p.minimumArea}
-          disabled={unsupported}
+          disabled
           onChange={(v) => update("minimumArea", v)}
         />
       </section>
@@ -184,7 +184,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.noise === name ? "selected" : ""}
               aria-pressed={p.noise === name}
-              disabled={unsupported}
+              disabled
               onClick={() => update("noise", name)}
             >
               {name}
@@ -198,7 +198,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           max={100}
           value={p.noiseStrength}
           unit="%"
-          disabled={unsupported || p.noise === "None"}
+          disabled
           onChange={(v) => update("noiseStrength", v)}
         />
       </details>

@@ -320,15 +320,16 @@ export default function Workspace({ view }: { view: View }) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const demo = source.kind === "demo" && preferences.demoVisuals;
   const stages = source.kind === "demo" ? STAGES : ANALYSIS_STAGES;
-  const statusText = busy ? "Processing in Python…" : status === "success" ? "Analysis complete · detection not run"
+  const edgesComputed = result?.detection_status === "edges_computed";
+  const statusText = busy ? "Processing in Python…" : status === "success" ? edgesComputed ? "Edges computed · objects not analyzed" : "Gaussian + Fourier complete · detection not run"
     : status === "error" ? "Analysis failed" : status === "outdated" ? "Settings changed · process again" : "Ready for an image analysis";
   const exportSession = useCallback(() => {
     downloadJson(
       {
-        schema_version: 2,
+        schema_version: 3,
         application: "SpectraEdge",
         exported_at: new Date().toISOString(),
-        mode: demo ? "illustrative-example" : "gaussian-fourier",
+        mode: demo ? "illustrative-example" : result ? result.detection_status === "edges_computed" ? "sobel-analysis" : "gaussian-fourier" : "unprocessed-session",
         source: {
           name: source.name,
           kind: source.kind,
@@ -348,6 +349,11 @@ export default function Workspace({ view }: { view: View }) {
           processing_time: result.processing_time,
           timing_unit: "ms",
           spectrum_scale: result.spectrum_scale,
+          threshold_rule: result.detection_status === "edges_computed" ? "raw Sobel magnitude > threshold" : null,
+          derivative_display: result.detection_status === "edges_computed" ? {
+            signed_min: -1020, signed_max: 1020, magnitude_min: 0,
+            magnitude_max: 1020 * Math.sqrt(2), mapping: "linear_grayscale",
+          } : null,
         } : demo
           ? {
               provenance: "demo",
@@ -358,7 +364,7 @@ export default function Workspace({ view }: { view: View }) {
             }
           : null,
         status,
-        note: result ? "Actual manual Gaussian and Fourier results. Detection has not run. Image data is exported separately from the cards."
+        note: result ? "Actual manual signal-processing results; see completed_stages and detection_status. Contours and object analysis have not run. Cards export display PNGs, not raw arrays."
           : "No computed results for the current image/settings. Any demo measurements are illustrative only.",
       },
       "spectraedge-session.json",
@@ -432,7 +438,7 @@ export default function Workspace({ view }: { view: View }) {
         <div className="top-actions">
           <span className="mode-label">
             <i />
-            Gaussian + Fourier
+            Sobel + Fourier
           </span>
           <span className="top-divider" />
           <IconButton label="Workspace settings" onClick={() => setDialog("settings")}>
@@ -501,7 +507,7 @@ export default function Workspace({ view }: { view: View }) {
                     {source.kind === "demo"
                       ? "Explore a four-object reference scene"
                       : result ? `Analyzed ${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} · ${result.processing_time.toFixed(1)} ms`
-                        : "Preview ≤512 px · Gaussian + manual Fourier"}
+                        : "Preview ≤512 px · Gaussian → Sobel → edges + Fourier"}
                   </span>
                 </div>
                 <button
@@ -523,7 +529,7 @@ export default function Workspace({ view }: { view: View }) {
                 <span>
                   {demo ? "Illustrative previews" : result ? "Computed in Python" : "No current results"}
                   <span className="subtle-dot" />
-                  {demo ? `${parameters.detector} example` : "Detection not run"}
+                  {demo ? `${parameters.detector} example` : edgesComputed ? "Sobel edges · objects not analyzed" : "Detection not run"}
                 </span>
               </div>
               <div className={`output-grid ${demo ? "" : "computed-grid"}`}>
@@ -534,8 +540,12 @@ export default function Workspace({ view }: { view: View }) {
                   selected={stages[stage].view === "filtered"}
                 />
                 {!demo && <>
-                  <VisualizationCard kind="spectrum" index="04" selected={stages[stage].view === "spectrum"} />
-                  <VisualizationCard kind="filtered-spectrum" index="05" selected={stages[stage].view === "spectrum"} />
+                  <VisualizationCard kind="gx" index="04" selected={stages[stage].view === "gradient"} />
+                  <VisualizationCard kind="gy" index="05" selected={stages[stage].view === "gradient"} />
+                  <VisualizationCard kind="gradient" index="06" selected={stages[stage].view === "gradient"} />
+                  <VisualizationCard kind="edges" index="07" selected={stages[stage].view === "edges"} />
+                  <VisualizationCard kind="spectrum" index="08" selected={stages[stage].view === "spectrum"} />
+                  <VisualizationCard kind="filtered-spectrum" index="09" selected={stages[stage].view === "spectrum"} />
                 </>}
                 {demo && <>
                 <VisualizationCard
@@ -555,13 +565,13 @@ export default function Workspace({ view }: { view: View }) {
                 />
                 <VisualizationCard kind="spectrum" index="06" />
                 </>}
-                {!demo && <VisualizationCard kind="edges" index="06" />}
                 <ObjectInformation />
               </div>
               {!demo && <p className="spectrum-scale-note">
                 Both spectra share one grayscale display range: 0 to {result ? result.spectrum_scale.max.toFixed(4) : "—"} in log(1 + magnitude).
                 {result && ` Used σ=${result.parameters_used.sigma}, kernel ${result.parameters_used.kernel_size} × ${result.parameters_used.kernel_size}.`}
-                {" "}No detector, contour, or noise stages have run.
+                {edgesComputed && ` Sobel edges use raw magnitude > ${result.parameters_used.threshold}. Derivatives use −1020…1020; magnitude uses 0…1442.5 for display only.`}
+                {" "}Contours, objects, and noise experiments have not run.
               </p>}
               <Pipeline />
             </>
@@ -582,7 +592,7 @@ export default function Workspace({ view }: { view: View }) {
           <em />
           Time <b>{result && view === "analyze" ? `${result.processing_time.toFixed(1)} ms` : demo && view !== "live" ? "18 ms (demo)" : "—"}</b>
           <em />
-          Detector <b>{demo ? `${parameters.detector} (example)` : "not run"}</b>
+          Detector <b>{demo ? `${parameters.detector} (example)` : edgesComputed && view === "analyze" ? "Sobel" : "not run"}</b>
           <em />
           {view === "live" ? "No stream" : result ? `${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} analyzed` : `${source.width} × ${source.height} source`}
         </span>
@@ -631,7 +641,7 @@ export default function Workspace({ view }: { view: View }) {
             <dl className="about-facts">
               <div>
                 <dt>Current phase</dt>
-                <dd>Gaussian + Fourier demonstration</dd>
+                <dd>Manual Sobel + threshold demonstration</dd>
               </div>
               <div>
                 <dt>Analysis engine</dt>
@@ -645,8 +655,8 @@ export default function Workspace({ view }: { view: View }) {
             <div className="privacy-note">
               <Cpu size={17} />
               <p>
-                Upload an image to calculate grayscale, Gaussian smoothing, and two Fourier spectra.
-                Detection, contours, detector comparison, and live camera processing are not implemented.
+                Upload an image to calculate grayscale, Gaussian smoothing, Sobel gradients, binary edges, and two Fourier spectra.
+                Prewitt, Laplacian, contours, object analysis, detector comparison, and live camera processing are not implemented.
                 Calibration artwork and its measurements remain a separate illustrative example.
               </p>
             </div>

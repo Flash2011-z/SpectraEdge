@@ -15,6 +15,8 @@ const TITLES: Record<Visualization, string> = {
   filtered: "Gaussian-blurred image",
   edges: "Edge map",
   gradient: "Gradient magnitude",
+  gx: "Sobel Gx · horizontal",
+  gy: "Sobel Gy · vertical",
   contours: "Object contours",
   spectrum: "FFT spectrum · original",
   "filtered-spectrum": "FFT spectrum · smoothed",
@@ -23,8 +25,10 @@ const DESCRIPTIONS: Record<Visualization, string> = {
   original: "Input / spatial domain",
   grayscale: "Grayscale intensity / spatial domain",
   filtered: "Gaussian smoothing",
-  edges: "Binary edge representation",
-  gradient: "Spatial intensity variation",
+  edges: "Raw magnitude > threshold / 0 or 255",
+  gradient: "Fixed display scale / 0 to 1442.5 raw units",
+  gx: "−1020 black / 0 gray / +1020 white",
+  gy: "−1020 black / 0 gray / +1020 white",
   contours: "Connected object boundaries",
   spectrum: "Log magnitude / frequency domain",
   "filtered-spectrum": "Smoothed log magnitude / frequency domain",
@@ -189,11 +193,13 @@ export function VisualSurface({
   zoom = 1,
   interactive = false,
   exportRef,
+  placeholderOnly = false,
 }: {
   kind: Visualization;
   zoom?: number;
   interactive?: boolean;
   exportRef?: React.RefObject<HTMLCanvasElement | null>;
+  placeholderOnly?: boolean;
 }) {
   const { source, preferences, selectedObject, setSelectedObject, result, status } = useWorkspace();
   const ownRef = useRef<HTMLCanvasElement>(null);
@@ -202,9 +208,9 @@ export function VisualSurface({
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const demo = source.kind === "demo" && preferences.demoVisuals;
-  const computedUrl = resultImage(result, kind);
+  const computedUrl = placeholderOnly ? null : resultImage(result, kind);
   const imageUrl = computedUrl || (source.kind === "image" && kind === "original" ? source.url : null);
-  const unsupported = ["edges", "gradient", "contours"].includes(kind);
+  const unsupported = placeholderOnly || kind === "contours";
   useEffect(() => {
     if (demo && canvasRef.current)
       drawIllustration(canvasRef.current, kind, selectedObject, preferences.grid);
@@ -285,7 +291,7 @@ export function VisualSurface({
           <ImageOff size={24} strokeWidth={1.25} />
           <strong>{unsupported ? "Not implemented" : status === "loading" ? "Calculating in Python…" : status === "outdated" ? "Results out of date" : "Awaiting analysis"}</strong>
           <span>
-            {unsupported ? "Detection and contours have not run." : source.kind === "image"
+            {unsupported ? placeholderOnly ? "Detector comparison is not implemented." : "Contours and object analysis have not run." : source.kind === "image"
               ? "Click Process image to calculate with the current settings."
               : "Upload an image, or open the separate illustrative example."}
           </span>
@@ -333,7 +339,9 @@ export function VisualizationCard({
   const [inspect, setInspect] = useState(false);
   const [zoom, setZoom] = useState(1);
   const exportRef = useRef<HTMLCanvasElement>(null);
-  const computedUrl = resultImage(result, kind);
+  // Compare remains a placeholder. Never label one Sobel result as Prewitt
+  // or Laplacian simply because all three panels share this component.
+  const computedUrl = detector ? null : resultImage(result, kind);
   const dimensions = computedUrl && result ? result.analyzed_dimensions : source;
   const canView = Boolean(computedUrl) || (
     source.kind === "demo"
@@ -342,7 +350,7 @@ export function VisualizationCard({
   const save = () => {
     if (computedUrl) {
       downloadFile(computedUrl, `spectraedge-computed-${kind}.png`);
-      notify("Computed image exported.");
+      notify(`${TITLES[kind]} exported · computed display PNG, not raw numerical data.`);
       return;
     }
     if (source.kind === "image" && kind === "original") {
@@ -392,7 +400,7 @@ export function VisualizationCard({
             </IconButton>
           </div>
         </header>
-        <VisualSurface key={(result?.request_id ?? source.url) + kind} kind={kind} />
+        <VisualSurface key={(result?.request_id ?? source.url) + kind} kind={kind} placeholderOnly={Boolean(detector)} />
         <footer className="instrument-footer">
           <span>{large ? source.name : DESCRIPTIONS[kind]}</span>
           <span>
@@ -446,6 +454,7 @@ export function VisualizationCard({
             zoom={zoom}
             interactive
             exportRef={exportRef}
+            placeholderOnly={Boolean(detector)}
           />
           <div className="inspector-footer">
             <ScanLine size={13} />

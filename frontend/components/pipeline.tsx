@@ -18,19 +18,19 @@ export function Pipeline() {
           <div className="pipeline-step" key={item.name}>
             <button
               onClick={() => setStage(i)}
-              disabled={busy || (source.kind !== "demo" && i >= 4)}
+              disabled={busy || ("key" in item && item.key === "objects")}
               className={stage === i ? "selected" : ""}
               aria-pressed={stage === i}
             >
               <span className="step-number">
-                {result && i < 4 ? <Check size={11} /> : `0${i + 1}`}
+                {result && "key" in item && result.completed_stages.includes(item.key) ? <Check size={11} /> : `0${i + 1}`}
               </span>
               <span className="step-text">
                 {item.name}
                 <small>{item.detail}</small>
               </span>
             </button>
-            {i < 5 && <ChevronRight className="pipeline-arrow" size={11} />}
+            {i < stages.length - 1 && <ChevronRight className="pipeline-arrow" size={11} />}
           </div>
         ))}
       </div>

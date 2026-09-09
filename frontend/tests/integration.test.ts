@@ -25,3 +25,21 @@ test("frontend adapter presents a real backend decode error", async () => {
   const invalid = new File(["not an image"], "invalid.png", { type: "image/png" });
   await assert.rejects(analyzeImage(invalid, { sigma: 0, kernel_size: 3 }, crypto.randomUUID(), new AbortController().signal), /valid image/);
 });
+
+test("real Sobel upload returns gradients and changing only threshold changes edges", async () => {
+  const settings = { sigma: 1.2, kernel_size: 7, detector: "Sobel" as const, threshold: 0 };
+  const weak = await analyzeImage(file, settings, crypto.randomUUID(), new AbortController().signal);
+  const strong = await analyzeImage(file, { ...settings, threshold: 1443 }, crypto.randomUUID(), new AbortController().signal);
+  assert.equal(weak.detection_status, "edges_computed");
+  assert.equal(weak.parameters_used.detector, "Sobel");
+  assert.equal(strong.parameters_used.threshold, 1443);
+  for (const key of ["gx", "gy", "gradient_magnitude", "edge_map"] as const) assert.match(weak[key]!, /^data:image\/png;base64,/);
+  assert.notEqual(weak.edge_map, strong.edge_map);
+  for (const key of ["gx", "gy", "gradient_magnitude", "filtered_image", "fft_image", "filtered_fft_image"] as const)
+    assert.equal(weak[key], strong[key]);
+  assert.deepEqual(weak.completed_stages, ["input", "grayscale", "smooth", "sobel", "threshold", "fourier"]);
+  assert.equal(weak.contour_image, null);
+  assert.equal(weak.object_list, null);
+  assert.equal(weak.fps, null);
+  console.log(`Actual Python Sobel processing: threshold=0 ${weak.processing_time} ms; threshold=1443 ${strong.processing_time} ms.`);
+});

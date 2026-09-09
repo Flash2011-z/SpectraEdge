@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeImage, createAnalysisRunner, parseAnalysisResult } from "../lib/api.ts";
-import { resultImage, validateGaussian, type ComputedAnalysisResult } from "../lib/workspace.ts";
+import { analysisSettings, DEFAULT_PARAMETERS, resultImage, validateAnalysis, validateGaussian, type AnalysisSettings, type ComputedAnalysisResult } from "../lib/workspace.ts";
 
 const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAAAAAC+OKDoAAAAJklEQVR4nGNkYPjPwIgHMzEQAv//48cETWAcdQMYjIYDBAyGcAAAxx2Pub9i5ZMAAAAASUVORK5CYII=";
 function fixture(id = "test-request"): ComputedAnalysisResult {
@@ -17,6 +17,109 @@ function fixture(id = "test-request"): ComputedAnalysisResult {
   };
 }
 const file = new File([new Uint8Array([1, 2, 3])], "input.png", { type: "image/png" });
+
+function sobelFixture(id = "test-request", threshold = 96): ComputedAnalysisResult {
+  return { ...fixture(id), gx: png, gy: png, gradient_magnitude: png, edge_map: png,
+    parameters_used: { sigma: 1.2, kernel_size: 7, detector: "Sobel", threshold },
+    detection_status: "edges_computed",
+    completed_stages: ["input", "grayscale", "smooth", "sobel", "threshold", "fourier"] };
+}
+
+test("Sobel settings use raw 0..1443 units and reject unsupported or incomplete settings", () => {
+  for (const threshold of [0, 96, 96.5, 1443])
+    assert.equal(validateAnalysis({ sigma: 1.2, kernel_size: 7, detector: "Sobel", threshold }), null);
+  for (const threshold of [-1, 1443.1, NaN, Infinity, undefined])
+    assert.match(validateAnalysis({ sigma: 1.2, kernel_size: 7, detector: "Sobel", threshold })!, /threshold/);
+  assert.match(validateAnalysis({ sigma: 1.2, kernel_size: 7, threshold: 96 })!, /requires/);
+  for (const detector of ["Prewitt", "Laplacian"] as const)
+    assert.match(validateAnalysis({ sigma: 1.2, kernel_size: 7, detector, threshold: 96 })!, /Only.*Sobel/);
+  assert.deepEqual(analysisSettings(DEFAULT_PARAMETERS), { sigma: 1.2, kernel_size: 5, detector: "Sobel", threshold: 96 });
+});
+
+test("Sobel response requires all actual derivative images but never invents object measurements", () => {
+  const result = parseAnalysisResult(sobelFixture(), "test-request");
+  for (const kind of ["gx", "gy", "gradient", "edges"] as const) assert.equal(resultImage(result, kind), png);
+  assert.equal(result.object_list, null);
+  const invalid = [
+    { ...result, detection_status: "not_run" }, { ...result, completed_stages: fixture().completed_stages },
+    { ...result, parameters_used: fixture().parameters_used }, { ...result, contour_image: png },
+    { ...result, object_list: [] }, { ...result, fps: 30 },
+    { ...result, parameters_used: { ...result.parameters_used, threshold: 1444 } },
+    ...["gx", "gy", "gradient_magnitude", "edge_map"].map((field) => ({ ...result, [field]: null })),
+  ];
+  for (const value of invalid) assert.throws(() => parseAnalysisResult(value, "test-request"), /incompatible/);
+});
+
+test("workspace snapshot sends Sobel plus threshold and omits all future controls", async (t) => {
+  t.mock.method(globalThis, "fetch", async (_url: string | URL | Request, options?: RequestInit) => {
+    const form = options?.body as FormData;
+    assert.deepEqual([...form.keys()], ["image", "sigma", "kernel_size", "request_id", "detector", "threshold"]);
+    assert.equal(form.get("image"), file);
+    assert.equal(form.get("detector"), "Sobel");
+    assert.equal(form.get("threshold"), "1443");
+    return Response.json(sobelFixture("test-request", 1443));
+  });
+  const snapshot = analysisSettings({ ...DEFAULT_PARAMETERS, kernel: 7, threshold: 1443 });
+  const result = await analyzeImage(file, snapshot, "test-request", new AbortController().signal);
+  assert.equal(result.detection_status, "edges_computed");
+});
+
+test("adapter rejects different threshold or detector mode even for otherwise valid results", async (t) => {
+  const mock = t.mock.method(globalThis, "fetch", async () => Response.json(sobelFixture("test-request", 200)));
+  await assert.rejects(analyzeImage(file, sobelFixture().parameters_used, "test-request", new AbortController().signal), /different settings/);
+  mock.mock.mockImplementation(async () => Response.json(fixture()));
+  await assert.rejects(analyzeImage(file, sobelFixture().parameters_used, "test-request", new AbortController().signal), /different settings/);
+  mock.mock.mockImplementation(async () => Response.json(sobelFixture()));
+  await assert.rejects(analyzeImage(file, fixture().parameters_used, "test-request", new AbortController().signal), /different settings/);
+});
+
+test("invalid detector settings fail before sending an upload", async (t) => {
+  const send = t.mock.method(globalThis, "fetch", async () => { throw new Error("must not send"); });
+  await assert.rejects(analyzeImage(file, { sigma: 0, kernel_size: 3, detector: "Prewitt", threshold: 96 }, "id", new AbortController().signal), /Only.*Sobel/);
+  await assert.rejects(analyzeImage(file, { sigma: 0, kernel_size: 3, detector: "Sobel" }, "id", new AbortController().signal), /threshold/);
+  assert.equal(send.mock.callCount(), 0);
+});
+
+test("changing only threshold cancels the previous request and ignores its late result", async () => {
+  const pending: { resolve: (result: ComputedAnalysisResult) => void; signal: AbortSignal; id: string; settings: AnalysisSettings }[] = [];
+  const runner = createAnalysisRunner((_file, settings, id, signal) => new Promise((resolve) => pending.push({ resolve, signal, id, settings })));
+  const accepted: number[] = [];
+  const callbacks = { success: (result: ComputedAnalysisResult) => accepted.push(result.parameters_used.threshold!), error: assert.fail };
+  const oldRequest = runner.run(file, sobelFixture().parameters_used, callbacks);
+  const newRequest = runner.run(file, sobelFixture("test-request", 500).parameters_used, callbacks);
+  assert.equal(pending[0].signal.aborted, true);
+  assert.equal(pending[1].settings.threshold, 500);
+  pending[1].resolve(sobelFixture(pending[1].id, 500));
+  await newRequest;
+  pending[0].resolve(sobelFixture(pending[0].id, 96));
+  await oldRequest;
+  assert.deepEqual(accepted, [500]);
+});
+
+test("detector and threshold are copied into the immutable submission snapshot", async () => {
+  const settings = sobelFixture().parameters_used;
+  const runner = createAnalysisRunner(async (_file, snapshot, id) => {
+    settings.detector = "Prewitt";
+    settings.threshold = 500;
+    assert.deepEqual(snapshot, { sigma: 1.2, kernel_size: 7, detector: "Sobel", threshold: 96 });
+    return sobelFixture(id);
+  });
+  await runner.run(file, settings, { success: () => {}, error: assert.fail });
+});
+
+test("cancelling for a detector change discards late success and error", async () => {
+  for (const rejectLate of [false, true]) {
+    let finish!: () => void;
+    const runner = createAnalysisRunner((_file, _settings, id) => new Promise((resolve, reject) => {
+      finish = () => rejectLate ? reject(new Error("stale detector error")) : resolve(sobelFixture(id));
+    }));
+    const request = runner.run(file, sobelFixture().parameters_used, { success: () => assert.fail("stale detector result"), error: assert.fail });
+    // updateParameter cancels this runner for every change, including detector.
+    runner.cancel();
+    finish();
+    await request;
+  }
+});
 
 test("Gaussian bounds and odd kernels agree with the API", () => {
   for (const kernel_size of [3, 5, 15, 31]) assert.equal(validateGaussian({ sigma: 5, kernel_size }), null);

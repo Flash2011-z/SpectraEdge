@@ -15,6 +15,7 @@ import {
   DEMO_SOURCE,
   EMPTY_SOURCE,
   MAX_DECODED_PIXELS,
+  analysisSettings,
   restoreParameters,
   validateImage,
   type Parameters,
@@ -155,6 +156,9 @@ function useWorkspaceState() {
           height: image.naturalHeight,
         });
         setFile(file);
+        // An old illustrative Prewitt/Laplacian preference cannot select an
+        // unimplemented detector for a real upload.
+        setParameters((previous) => ({ ...previous, detector: "Sobel" }));
         setStatus("idle");
         setLoadingImage(false);
         setStage(0);
@@ -174,19 +178,19 @@ function useWorkspaceState() {
   const process = useCallback(() => {
     if (busy || loadingImage) return;
     if (!file || source.kind !== "image") {
-      notify("Upload an image to run real Gaussian and Fourier analysis. The calibration example is illustrative only.");
+      notify("Upload an image to run real Gaussian, Sobel, and Fourier analysis. The calibration example is illustrative only.");
       return;
     }
     setStatus("loading");
     setError("");
     setResult(null);
     setStage(0);
-    void requests.run(file, { sigma: parameters.sigma, kernel_size: parameters.kernel }, {
+    void requests.run(file, analysisSettings(parameters), {
       success: (computed) => {
         setResult(computed);
         setStatus("success");
-        setStage(3);
-        notify("Gaussian and Fourier analysis complete. Detection has not run.");
+        setStage(4);
+        notify("Sobel edges and Fourier analysis complete. Objects have not been analyzed.");
       },
       error: (message) => { setStatus("error"); setError(message); },
     });

@@ -21,6 +21,8 @@ test("restored numeric settings stay within supported bounds and steps", () => {
   assert.equal(restored.threshold, 0);
   assert.equal(restored.minimumArea, 500);
   assert.equal(restored.noiseStrength, 12);
+  assert.equal(restoreParameters({ threshold: 2000 }).threshold, 1443);
+  assert.equal(restoreParameters({ threshold: 900 }).threshold, 900);
 });
 test("image validation rejects empty, unsupported, and oversized files", () => {
   assert.match(validateImage({ type: "image/svg+xml", size: 100 })!, /PNG/);
