@@ -11,7 +11,7 @@ method, with separate `requirements-ai.txt` and photo-free model setup. Base
 requirements and the manual mathematics are unchanged. Optional libraries and
 the cached model load only on an explicit AI extraction, never during app startup.
 
-Follow [the root README](../README.md) for dependency installation and two-terminal startup. Python 3.12+ is required. From the project root:
+Follow [the root README](../README.md) for dependency installation. Run `npm.cmd run dev` from the project root to start both services. Python 3.12+ is required. To start only the backend:
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -B -m uvicorn backend.app:app --host 127.0.0.1 --port 8000

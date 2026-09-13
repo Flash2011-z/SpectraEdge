@@ -5,7 +5,8 @@
   "description": "Local commands for the SpectraEdge website project",
   "scripts": {
     "setup": "npm --prefix frontend install",
-    "dev": "npm --prefix frontend run dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix frontend start",
     "check": "npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend test"

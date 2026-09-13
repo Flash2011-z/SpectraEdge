@@ -24,23 +24,25 @@ python -m venv backend/.venv
 npm.cmd run setup
 ```
 
-Terminal 1: start Python and keep the terminal open.
-
-```powershell
-cd D:\SpectraEdge
-.\backend\.venv\Scripts\python.exe -B -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
-```
-
-Terminal 2: start the website and keep the terminal open.
+Start both Python and the website with one command and keep the terminal open:
 
 ```powershell
 cd D:\SpectraEdge
 npm.cmd run dev
 ```
 
-Open `http://localhost:3000`. Backend health: `http://127.0.0.1:8000/health`. Interactive API docs: `http://127.0.0.1:8000/docs`. Stop each service with Ctrl+C; restart Python after backend edits.
+Python reloads automatically after backend edits. Ctrl+C stops both services started by this command. If a healthy SpectraEdge backend is already running on port 8000, it is reused and remains running when this command stops.
 
-`Start Website.cmd` starts **only the frontend**; Python must also be running. No deployment is necessary. Existing hosting configuration is retained but unused by local startup.
+For separate terminals, start Python with the following command, then run `npm.cmd run dev:frontend` in another terminal:
+
+```powershell
+cd D:\SpectraEdge
+.\backend\.venv\Scripts\python.exe -B -m uvicorn backend.app:app --reload --reload-dir backend --host 127.0.0.1 --port 8000
+```
+
+Open `http://localhost:3000`. Backend health: `http://127.0.0.1:8000/health`. Interactive API docs: `http://127.0.0.1:8000/docs`.
+
+`Start Website.cmd` also starts both services using `npm.cmd run dev`. No deployment is necessary. Existing hosting configuration is retained but unused by local startup.
 
 ### Optional address configuration
 
