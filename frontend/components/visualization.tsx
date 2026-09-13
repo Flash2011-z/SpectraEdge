@@ -34,6 +34,19 @@ const DESCRIPTIONS: Record<Visualization, string> = {
   "filtered-spectrum": "Smoothed log magnitude / frequency domain",
 };
 
+const SIGNAL_ART: Record<Visualization, string> = {
+  original: "signal-welcome-sharp",
+  grayscale: "signal-grayscale",
+  filtered: "signal-filtered",
+  gx: "signal-gx",
+  gy: "signal-gy",
+  gradient: "signal-gradient",
+  edges: "signal-edges",
+  contours: "signal-edges",
+  spectrum: "signal-spectrum",
+  "filtered-spectrum": "signal-filtered-spectrum",
+};
+
 // Static educational artwork only: no input pixels are processed by this renderer.
 function drawIllustration(
   canvas: HTMLCanvasElement,
@@ -201,7 +214,7 @@ export function VisualSurface({
   exportRef?: React.RefObject<HTMLCanvasElement | null>;
   placeholderOnly?: boolean;
 }) {
-  const { source, preferences, selectedObject, setSelectedObject, result, status } = useWorkspace();
+  const { source, preferences, selectedObject, setSelectedObject, result, status, openImagePicker } = useWorkspace();
   const ownRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = exportRef ?? ownRef;
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -211,6 +224,7 @@ export function VisualSurface({
   const computedUrl = placeholderOnly ? null : resultImage(result, kind);
   const imageUrl = computedUrl || (source.kind === "image" && kind === "original" ? source.url : null);
   const unsupported = placeholderOnly || kind === "contours";
+  const welcome = source.kind === "empty" && !placeholderOnly;
   useEffect(() => {
     if (demo && canvasRef.current)
       drawIllustration(canvasRef.current, kind, selectedObject, preferences.grid);
@@ -286,6 +300,21 @@ export function VisualSurface({
           style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
           draggable={false}
         />
+      ) : welcome ? (
+        <div className={`signal-welcome ${kind === "original" ? "signal-welcome-main" : "signal-welcome-stage"}`}>
+          <img
+            src={`/images/${SIGNAL_ART[kind]}.png`}
+            alt={`Conceptual ${TITLES[kind].toLowerCase()} artwork; not a computed result`}
+            className="signal-welcome-art"
+            draggable={false}
+          />
+          {kind === "original" && <div className="signal-welcome-copy">
+            <span className="signal-welcome-kicker">SPECTRAEDGE / SIGNAL LAB</span>
+            <strong>See the structure.<br /><span>Discover the signal.</span></strong>
+            <p>From a single image to a new perspective.<br />Explore edges, gradients, and frequencies.</p>
+            <button className="button signal-welcome-upload" onClick={openImagePicker}>Choose an image <span aria-hidden="true">↗</span></button>
+          </div>}
+        </div>
       ) : (
         <div className="empty-state">
           <ImageOff size={24} strokeWidth={1.25} />
@@ -298,7 +327,7 @@ export function VisualSurface({
         </div>
       )}
       <span className="viewport-label">
-        {demo ? "ILLUSTRATIVE SAMPLE" : computedUrl ? "COMPUTED · PYTHON" : imageUrl ? "LOCAL PREVIEW" : "NO OUTPUT"}
+        {welcome ? "CONCEPT ART · AWAITING IMAGE" : demo ? "ILLUSTRATIVE SAMPLE" : computedUrl ? "COMPUTED · PYTHON" : imageUrl ? "LOCAL PREVIEW" : "NO OUTPUT"}
       </span>
       {kind === "contours" && demo && !interactive && (
         <div className="object-hotspots" role="group" aria-label="Select an object">
@@ -317,7 +346,7 @@ export function VisualSurface({
           View x {cursor.x} / y {cursor.y}
         </span>
       )}
-      {!interactive && <span className="axis-label">{kind.includes("spectrum") ? "fₓ →" : "x →"}</span>}
+      {!interactive && !welcome && <span className="axis-label">{kind.includes("spectrum") ? "fₓ →" : "x →"}</span>}
     </div>
   );
 }
