@@ -370,6 +370,15 @@ select option {
   background: #17212c;
   color: #e8eef5;
 }
+.scale-input {
+  width: 72px;
+  background: #17212c;
+  color: #e8eef5;
+  border: 1px solid #344555;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font: inherit;
+}
 .workspace {
   padding: 25px 28px;
   flex: 1;
@@ -1832,6 +1841,7 @@ select option {
 .comparison-brief dl {
   margin: 17px 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 19px;
 }
 .comparison-brief dt {
@@ -1842,6 +1852,15 @@ select option {
 .comparison-brief dd {
   font: 12px var(--font-mono);
   margin: 0;
+}
+.comparison-threshold-input {
+  width: 78px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 5px 7px;
+  font: 11px var(--font-mono);
 }
 .comparison-brief .button {
   align-self: flex-start;
@@ -1896,8 +1915,9 @@ select option {
   height: 177px;
 }
 .comparison-metrics {
-  display: flex;
-  gap: 28px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
   margin: 0;
   padding: 17px;
 }
@@ -1905,8 +1925,8 @@ select option {
   flex: 1;
 }
 .comparison-metrics > div + div {
-  border-left: 1px solid #2b3b4a;
-  padding-left: 22px;
+  border-left: 0;
+  padding-left: 0;
 }
 .comparison-metrics dt {
   color: var(--faint);

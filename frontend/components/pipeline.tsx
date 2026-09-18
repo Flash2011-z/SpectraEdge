@@ -1,12 +1,16 @@
 "use client";
 
 import { Check, ChevronRight } from "lucide-react";
-import { ANALYSIS_STAGES, STAGES } from "@/lib/workspace";
+import { analysisStages, STAGES } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 
 export function Pipeline() {
-  const { stage, setStage, busy, source, result } = useWorkspace();
-  const stages = source.kind === "demo" ? STAGES : ANALYSIS_STAGES;
+  const { stage, setStage, busy, source, result, parameters } = useWorkspace();
+  const stages = source.kind === "demo" ? STAGES : analysisStages(
+    result?.parameters_used.detector ?? parameters.detector,
+    result?.parameters_used.multi_scale ?? parameters.multiScale,
+    result?.noise.model ?? parameters.noise,
+  );
   return (
     <section className="pipeline" aria-label="Processing pipeline">
       <div className="pipeline-title">
@@ -18,7 +22,7 @@ export function Pipeline() {
           <div className="pipeline-step" key={item.name}>
             <button
               onClick={() => setStage(i)}
-              disabled={busy || ("key" in item && item.key === "objects")}
+              disabled={busy || ("key" in item && item.key === "objects" && result?.object_list === null)}
               className={stage === i ? "selected" : ""}
               aria-pressed={stage === i}
             >

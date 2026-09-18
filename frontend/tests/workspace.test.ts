@@ -14,15 +14,20 @@ test("restored numeric settings stay within supported bounds and steps", () => {
   const restored = restoreParameters({
     sigma: 99,
     threshold: -2,
-    minimumArea: 476,
+    laplacianMinimumComponentArea: 476,
     noiseStrength: Infinity,
   });
   assert.equal(restored.sigma, 5);
   assert.equal(restored.threshold, 0);
-  assert.equal(restored.minimumArea, 500);
+  assert.equal(restored.laplacianMinimumComponentArea, 476);
+  assert.equal(restoreParameters({ laplacianMinimumComponentArea: 0 }).laplacianMinimumComponentArea, 1);
   assert.equal(restored.noiseStrength, 12);
+  assert.equal(restoreParameters({ noise: "Salt & Pepper", noiseStrength: 0.12 }).noiseStrength, 0.12);
   assert.equal(restoreParameters({ threshold: 2000 }).threshold, 1443);
   assert.equal(restoreParameters({ threshold: 900 }).threshold, 900);
+  assert.deepEqual(restoreParameters({ multiScale: true, scaleSigmas: [0.8, 1.6, 3.2], scaleSupport: 3 }).scaleSigmas,
+    [0.8, 1.6, 3.2]);
+  assert.equal(restoreParameters({ multiScale: true, scaleSigmas: [1, 1, 2], scaleSupport: 9 }).scaleSupport, 2);
 });
 test("image validation rejects empty, unsupported, and oversized files", () => {
   assert.match(validateImage({ type: "image/svg+xml", size: 100 })!, /PNG/);

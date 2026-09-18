@@ -24,8 +24,13 @@ import {
 } from "lucide-react";
 import {
   DEMO_OBJECTS,
-  ANALYSIS_STAGES,
+  analysisStages,
+  comparisonEntries,
+  detectorDisplay,
+  thresholdRule,
+  thresholdLabel,
   DETECTOR_DESCRIPTIONS,
+  MAX_THRESHOLD,
   STAGES,
   type Preferences,
   type View,
@@ -34,6 +39,7 @@ import { useWorkspace } from "./workspace-provider";
 import { ParametersPanel } from "./parameters";
 import { VisualizationCard } from "./visualization";
 import { ObjectInformation } from "./object-information";
+import { MultiScaleResults } from "./multiscale-results";
 import { Pipeline } from "./pipeline";
 import { downloadJson, IconButton, Modal } from "./ui";
 import { WorkspaceBrand, WorkspaceNavigation } from "./workspace-navigation";
@@ -124,8 +130,11 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
 }
 
 function CompareView() {
-  const { source, preferences, parameters } = useWorkspace();
+  const { source, preferences, parameters, comparisonResult, comparisonStatus,
+    comparisonError, processComparison, canCompare, updateComparisonParameter } = useWorkspace();
   const demo = source.kind === "demo" && preferences.demoVisuals;
+  const entries = comparisonEntries(comparisonResult);
+  const loading = comparisonStatus === "loading";
   return (
     <div className="compare-view">
       <div className="comparison-source">
@@ -153,17 +162,36 @@ function CompareView() {
               </dd>
             </div>
             <div>
-              <dt>Threshold</dt>
-              <dd>{parameters.threshold}</dd>
+              <dt><label htmlFor="compare-sobel-threshold">Sobel gradient magnitude threshold</label></dt>
+              <dd><input id="compare-sobel-threshold" className="comparison-threshold-input"
+                type="number" min={0} max={MAX_THRESHOLD} step={1}
+                value={parameters.comparisonSobelThreshold} disabled={loading || demo}
+                onChange={(event) => updateComparisonParameter("comparisonSobelThreshold", Number(event.target.value))} /></dd>
+            </div>
+            <div>
+              <dt><label htmlFor="compare-prewitt-threshold">Prewitt gradient magnitude threshold</label></dt>
+              <dd><input id="compare-prewitt-threshold" className="comparison-threshold-input"
+                type="number" min={0} max={MAX_THRESHOLD} step={1}
+                value={parameters.comparisonPrewittThreshold} disabled={loading || demo}
+                onChange={(event) => updateComparisonParameter("comparisonPrewittThreshold", Number(event.target.value))} /></dd>
+            </div>
+            <div>
+              <dt><label htmlFor="compare-laplacian-threshold">Laplacian zero-crossing contrast threshold</label></dt>
+              <dd><input id="compare-laplacian-threshold" className="comparison-threshold-input"
+                type="number" min={0} max={MAX_THRESHOLD} step={1}
+                value={parameters.comparisonLaplacianContrastThreshold} disabled={loading || demo}
+                onChange={(event) => updateComparisonParameter("comparisonLaplacianContrastThreshold", Number(event.target.value))} /></dd>
             </div>
           </dl>
-          <button className="button primary" disabled>
-            <Play size={13} />Detector comparison not implemented
+          {comparisonError && <p className="analysis-error" role="alert">{comparisonError}</p>}
+          <button className="button primary" disabled={!canCompare || demo} onClick={processComparison}>
+            {loading ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}
+            {loading ? "Comparing detectors…" : comparisonResult ? "Run comparison again" : "Compare detectors"}
           </button>
         </div>
       </div>
       <div className="comparison-results">
-        {(["Sobel", "Prewitt", "Laplacian"] as const).map((detector, i) => (
+        {entries.map(({ detector, result }, i) => (
           <section className="detector-result" key={detector}>
             <header>
               <span className="detector-number">0{i + 1}</span>
@@ -171,18 +199,27 @@ function CompareView() {
                 <h2>{detector}</h2>
                 <p>{DETECTOR_DESCRIPTIONS[detector]}</p>
               </div>
-              <span className="tag">{demo ? "DEMO" : "IDLE"}</span>
+              <span className="tag">{demo ? "DEMO" : result ? "COMPUTED" : loading ? "RUNNING" : "IDLE"}</span>
             </header>
-            <VisualizationCard kind="edges" index={`0${i + 2}`} detector={detector} />
+            <VisualizationCard kind="edges" index={`0${i + 2}`} detector={detector}
+              comparisonResult={result} comparisonDimensions={comparisonResult?.analyzed_dimensions} />
             <dl className="comparison-metrics">
               <div>
-                <dt>Objects detected</dt>
-                <dd>{demo ? "04" : "—"}</dd>
+                <dt>Edge pixels</dt>
+                <dd>{demo ? "—" : result?.edge_pixel_count ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Objects</dt>
+                <dd>{demo ? "04" : result?.object_count ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Average component area</dt>
+                <dd>{demo ? "—" : result ? result.average_object_area.toFixed(2) : "—"}<small> px</small></dd>
               </div>
               <div>
                 <dt>Processing time</dt>
                 <dd>
-                  {demo ? [18, 16, 12][i] : "—"}
+                  {demo ? [18, 16, 12][i] : result ? result.processing_time.toFixed(3) : "—"}
                   <small> ms</small>
                 </dd>
               </div>
@@ -190,7 +227,9 @@ function CompareView() {
             <p className="result-caption">
               {demo
                 ? "Preset visual and metrics · not a measured result"
-                : "Detector comparison is not implemented"}
+                : result ? `${result.metadata.threshold_label} = ${result.metadata.threshold}`
+                : loading ? "Calculating from the shared filtered signal"
+                : "Awaiting detector comparison"}
             </p>
           </section>
         ))}
@@ -198,8 +237,10 @@ function CompareView() {
       <div className="page-note">
         <Info size={14} />
         <span>
-          This prototype demonstrates the comparison layout. Demo results are illustrative and
-          cannot establish which detector performs best.
+          {demo ? "Demo results are illustrative and cannot establish which detector performs best."
+            : comparisonResult
+              ? `All detectors used one decoded image and one Gaussian-filtered signal. Total request time: ${comparisonResult.processing_time.toFixed(3)} ms.`
+              : "Upload an image and run comparison. All detectors will share the same decoded and Gaussian-filtered signal."}
         </span>
       </div>
     </div>
@@ -313,14 +354,21 @@ export default function Workspace({ view }: { view: View }) {
     error,
     busy,
     canProcess,
+    comparisonResult,
+    comparisonStatus,
     loadingImage,
   } = useWorkspace();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const demo = source.kind === "demo" && preferences.demoVisuals;
-  const stages = source.kind === "demo" ? STAGES : ANALYSIS_STAGES;
+  const activeDetector = result?.parameters_used.detector ?? parameters.detector;
+  const stages = source.kind === "demo" ? STAGES : analysisStages(
+    activeDetector, result?.parameters_used.multi_scale ?? parameters.multiScale,
+    result?.noise.model ?? parameters.noise,
+  );
+  const display = detectorDisplay(activeDetector);
   const edgesComputed = result?.detection_status === "edges_computed";
-  const statusText = busy ? "Processing in Python…" : status === "success" ? edgesComputed ? "Edges computed · objects not analyzed" : "Gaussian + Fourier complete · detection not run"
+  const statusText = busy ? "Processing in Python…" : status === "success" ? edgesComputed ? `${result!.object_list?.length ?? 0} connected objects measured` : "Gaussian + Fourier complete · detection not run"
     : status === "error" ? "Analysis failed" : status === "outdated" ? "Settings changed · process again" : "Ready for an image analysis";
   const exportSession = useCallback(() => {
     downloadJson(
@@ -328,7 +376,7 @@ export default function Workspace({ view }: { view: View }) {
         schema_version: 3,
         application: "SpectraEdge",
         exported_at: new Date().toISOString(),
-        mode: demo ? "illustrative-example" : result ? result.detection_status === "edges_computed" ? "sobel-analysis" : "gaussian-fourier" : "unprocessed-session",
+        mode: demo ? "illustrative-example" : result ? result.detection_status === "edges_computed" ? `${result.parameters_used.detector!.toLowerCase()}-analysis` : "gaussian-fourier" : "unprocessed-session",
         source: {
           name: source.name,
           kind: source.kind,
@@ -348,11 +396,8 @@ export default function Workspace({ view }: { view: View }) {
           processing_time: result.processing_time,
           timing_unit: "ms",
           spectrum_scale: result.spectrum_scale,
-          threshold_rule: result.detection_status === "edges_computed" ? "raw Sobel magnitude > threshold" : null,
-          derivative_display: result.detection_status === "edges_computed" ? {
-            signed_min: -1020, signed_max: 1020, magnitude_min: 0,
-            magnitude_max: 1020 * Math.sqrt(2), mapping: "linear_grayscale",
-          } : null,
+          threshold_rule: result.detection_status === "edges_computed" ? thresholdRule(result.parameters_used.detector!) : null,
+          derivative_display: result.detection_status === "edges_computed" ? detectorDisplay(result.parameters_used.detector!) : null,
         } : demo
           ? {
               provenance: "demo",
@@ -363,7 +408,7 @@ export default function Workspace({ view }: { view: View }) {
             }
           : null,
         status,
-        note: result ? "Actual manual signal-processing results; see completed_stages and detection_status. Contours and object analysis have not run. Cards export display PNGs, not raw arrays."
+        note: result ? "Actual manual signal-processing results; detector runs include connected foreground measurements. Cards export display PNGs, not raw arrays."
           : "No computed results for the current image/settings. Any demo measurements are illustrative only.",
       },
       "spectraedge-session.json",
@@ -413,7 +458,7 @@ export default function Workspace({ view }: { view: View }) {
         <div className="top-actions">
           <span className="mode-label">
             <i />
-            Sobel + Fourier
+            {activeDetector} + Fourier
           </span>
           <span className="top-divider" />
           <IconButton label="Workspace settings" onClick={() => setDialog("settings")}>
@@ -482,7 +527,7 @@ export default function Workspace({ view }: { view: View }) {
                     {source.kind === "demo"
                       ? "Explore a four-object reference scene"
                       : result ? `Analyzed ${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} · ${result.processing_time.toFixed(1)} ms`
-                        : "Preview ≤512 px · Gaussian → Sobel → edges + Fourier"}
+                        : `Preview ≤512 px · Gaussian → ${activeDetector} → edges + Fourier`}
                   </span>
                 </div>
                 <button
@@ -504,23 +549,27 @@ export default function Workspace({ view }: { view: View }) {
                 <span>
                   {demo ? "Illustrative previews" : result ? "Computed in Python" : "No current results"}
                   <span className="subtle-dot" />
-                  {demo ? `${parameters.detector} example` : edgesComputed ? "Sobel edges · objects not analyzed" : "Detection not run"}
+                  {demo ? `${parameters.detector} example` : edgesComputed ? `${activeDetector} edges · ${result?.object_list?.length ?? 0} objects` : "Detection not run"}
                 </span>
               </div>
               <div className={`output-grid ${demo ? "" : "computed-grid"}`}>
                 {!demo && <VisualizationCard kind="grayscale" index="02" selected={stages[stage].view === "grayscale"} />}
+                {!demo && result?.noisy_image && <VisualizationCard kind="noisy" index="03" selected={stages[stage].view === "noisy"} />}
                 <VisualizationCard
                   kind="filtered"
-                  index="03"
+                  index={result?.noisy_image ? "04" : "03"}
                   selected={stages[stage].view === "filtered"}
                 />
                 {!demo && <>
+                  {activeDetector === "Laplacian" ? <VisualizationCard kind="laplacian" index="04" selected={stages[stage].view === "laplacian"} /> : <>
                   <VisualizationCard kind="gx" index="04" selected={stages[stage].view === "gradient"} />
                   <VisualizationCard kind="gy" index="05" selected={stages[stage].view === "gradient"} />
                   <VisualizationCard kind="gradient" index="06" selected={stages[stage].view === "gradient"} />
+                  </>}
                   <VisualizationCard kind="edges" index="07" selected={stages[stage].view === "edges"} />
-                  <VisualizationCard kind="spectrum" index="08" selected={stages[stage].view === "spectrum"} />
-                  <VisualizationCard kind="filtered-spectrum" index="09" selected={stages[stage].view === "spectrum"} />
+                  <VisualizationCard kind="contours" index="08" selected={stages[stage].view === "contours"} />
+                  <VisualizationCard kind="spectrum" index="09" selected={stages[stage].view === "spectrum"} />
+                  <VisualizationCard kind="filtered-spectrum" index="10" selected={stages[stage].view === "spectrum"} />
                 </>}
                 {demo && <>
                 <VisualizationCard
@@ -542,11 +591,13 @@ export default function Workspace({ view }: { view: View }) {
                 </>}
                 <ObjectInformation />
               </div>
+              {!demo && <MultiScaleResults />}
               {!demo && <p className="spectrum-scale-note">
                 Both spectra share one grayscale display range: 0 to {result ? result.spectrum_scale.max.toFixed(4) : "—"} in log(1 + magnitude).
                 {result && ` Used σ=${result.parameters_used.sigma}, kernel ${result.parameters_used.kernel_size} × ${result.parameters_used.kernel_size}.`}
-                {edgesComputed && ` Sobel edges use raw magnitude > ${result.parameters_used.threshold}. Derivatives use −1020…1020; magnitude uses 0…1442.5 for display only.`}
-                {" "}Contours, objects, and noise experiments have not run.
+                {edgesComputed && ` ${thresholdLabel(activeDetector)} = ${result.parameters_used.threshold}. ${thresholdRule(activeDetector)}. Signed display range: ${display.signed_min}…${display.signed_max}${display.magnitude_max === null ? `. Zero is gray; negative is dark and positive is bright. Components below ${result.detector_metadata?.minimum_component_area ?? 2} pixels are excluded only from Laplacian contour/object analysis.` : `; magnitude display range: 0…${display.magnitude_max.toFixed(1)}.`}`}
+                {result && ` Noise: ${result.noise.model}${result.noise.model === "None" ? "." : `, ${result.noise.strength} ${result.noise.units}, seed ${result.noise.seed}.`}`}
+                {" "}Objects are eight-connected foreground regions; area counts foreground pixels and perimeter counts exposed pixel sides.
               </p>}
               <Pipeline />
             </>
@@ -560,16 +611,24 @@ export default function Workspace({ view }: { view: View }) {
       <footer className="statusbar">
         <span>
           <i className="status-dot" />
-          {source.kind === "demo" ? "Illustrative example" : view === "analyze" ? statusText : "Planned workspace · not implemented"}
+          {source.kind === "demo" ? "Illustrative example" : view === "analyze" ? statusText
+            : view === "compare" ? comparisonStatus === "loading" ? "Comparing detectors in Python…"
+              : comparisonResult ? "Detector comparison computed" : "Ready for detector comparison"
+            : "Planned workspace · not implemented"}
         </span>
         <span className="status-metrics">
-          Objects <b>{demo && view !== "live" ? "4" : "—"}</b>
+          Objects <b>{demo && view !== "live" ? "4" : result && view === "analyze" && result.object_list !== null ? result.object_list.length : "—"}</b>
           <em />
-          Time <b>{result && view === "analyze" ? `${result.processing_time.toFixed(1)} ms` : demo && view !== "live" ? "18 ms (demo)" : "—"}</b>
+          Time <b>{result && view === "analyze" ? `${result.processing_time.toFixed(1)} ms`
+            : comparisonResult && view === "compare" ? `${comparisonResult.processing_time.toFixed(1)} ms`
+            : demo && view !== "live" ? "18 ms (demo)" : "—"}</b>
           <em />
-          Detector <b>{demo ? `${parameters.detector} (example)` : edgesComputed && view === "analyze" ? "Sobel" : "not run"}</b>
+          Detector <b>{demo ? `${parameters.detector} (example)` : edgesComputed && view === "analyze" ? activeDetector
+            : comparisonResult && view === "compare" ? "All three" : "not run"}</b>
           <em />
-          {view === "live" ? "No stream" : result ? `${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} analyzed` : `${source.width} × ${source.height} source`}
+          {view === "live" ? "No stream" : comparisonResult && view === "compare"
+            ? `${comparisonResult.analyzed_dimensions.width} × ${comparisonResult.analyzed_dimensions.height} analyzed`
+            : result ? `${result.analyzed_dimensions.width} × ${result.analyzed_dimensions.height} analyzed` : `${source.width} × ${source.height} source`}
         </span>
         <button className="text-button" onClick={() => setDialog("shortcuts")}>
           <Keyboard size={12} />
@@ -616,7 +675,7 @@ export default function Workspace({ view }: { view: View }) {
             <dl className="about-facts">
               <div>
                 <dt>Current phase</dt>
-                <dd>Manual Sobel + threshold demonstration</dd>
+                <dd>Manual Sobel, Prewitt, and Laplacian detection</dd>
               </div>
               <div>
                 <dt>Analysis engine</dt>
@@ -630,8 +689,8 @@ export default function Workspace({ view }: { view: View }) {
             <div className="privacy-note">
               <Cpu size={17} />
               <p>
-                Upload an image to calculate grayscale, Gaussian smoothing, Sobel gradients, binary edges, and two Fourier spectra.
-                Prewitt, Laplacian, contours, object analysis, detector comparison, and live camera processing are not implemented.
+                Upload an image to calculate grayscale, Gaussian smoothing, Sobel or Prewitt gradients, or a signed Laplacian response with zero-crossing edges, plus two Fourier spectra.
+                Connected-region contours, measurements, noise experiments, multi-scale persistence, and three-detector comparison are included. The Live page processes webcam frames.
                 Calibration artwork and its measurements remain a separate illustrative example.
               </p>
             </div>
@@ -650,14 +709,14 @@ export default function Workspace({ view }: { view: View }) {
             <div className="camera-info-icon">
               <Camera size={30} strokeWidth={1.3} />
             </div>
-            <h3>Ready for the next phase.</h3>
+            <h3>Analyze your webcam in Live.</h3>
             <p className="dialog-description">
-              The Live page provides a dedicated camera and output workspace. Camera capture is
-              currently disabled while the analysis engine is being developed.
+              Open Live and select Start camera to see grayscale, Gaussian-filtered, edge,
+              and Fourier outputs from your webcam.
             </p>
             <div className="privacy-note">
               <LockKeyhole size={17} />
-              <p>No camera permissions are requested and no video is recorded.</p>
+              <p>Start camera requests permission. Frames are processed in memory by your configured Python backend. Stop camera releases the webcam; no video is recorded.</p>
             </div>
           </div>
           <footer className="modal-actions">

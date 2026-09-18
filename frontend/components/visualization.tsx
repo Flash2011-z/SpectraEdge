@@ -5,18 +5,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Download, Focus, ImageOff, Maximize2, Minus, Plus, ScanLine, ZoomIn } from "lucide-react";
-import { resultImage, type Visualization } from "@/lib/workspace";
+import { detectorDisplay, detectorLabel, resultImage, type ComparisonDetectorResult,
+  type Detector, type Visualization } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 import { downloadFile, IconButton, Modal } from "./ui";
 
 const TITLES: Record<Visualization, string> = {
   original: "Original image",
   grayscale: "Grayscale image",
+  noisy: "Noisy grayscale image",
   filtered: "Gaussian-blurred image",
   edges: "Edge map",
   gradient: "Gradient magnitude",
   gx: "Sobel Gx · horizontal",
   gy: "Sobel Gy · vertical",
+  laplacian: "Laplacian signed response",
   contours: "Object contours",
   spectrum: "FFT spectrum · original",
   "filtered-spectrum": "FFT spectrum · smoothed",
@@ -24,11 +27,13 @@ const TITLES: Record<Visualization, string> = {
 const DESCRIPTIONS: Record<Visualization, string> = {
   original: "Input / spatial domain",
   grayscale: "Grayscale intensity / spatial domain",
+  noisy: "Seeded noise / analysis input",
   filtered: "Gaussian smoothing",
   edges: "Raw magnitude > threshold / 0 or 255",
   gradient: "Fixed display scale / 0 to 1442.5 raw units",
   gx: "−1020 black / 0 gray / +1020 white",
   gy: "−1020 black / 0 gray / +1020 white",
+  laplacian: "−1020 black / 0 gray / +1020 white",
   contours: "Connected object boundaries",
   spectrum: "Log magnitude / frequency domain",
   "filtered-spectrum": "Smoothed log magnitude / frequency domain",
@@ -37,9 +42,11 @@ const DESCRIPTIONS: Record<Visualization, string> = {
 const SIGNAL_ART: Record<Visualization, string> = {
   original: "signal-welcome-sharp",
   grayscale: "signal-grayscale",
+  noisy: "signal-grayscale",
   filtered: "signal-filtered",
   gx: "signal-gx",
   gy: "signal-gy",
+  laplacian: "signal-gradient",
   gradient: "signal-gradient",
   edges: "signal-edges",
   contours: "signal-edges",
@@ -207,24 +214,29 @@ export function VisualSurface({
   interactive = false,
   exportRef,
   placeholderOnly = false,
+  explicitImage,
+  explicitDetector,
 }: {
   kind: Visualization;
   zoom?: number;
   interactive?: boolean;
   exportRef?: React.RefObject<HTMLCanvasElement | null>;
   placeholderOnly?: boolean;
+  explicitImage?: string;
+  explicitDetector?: Detector;
 }) {
-  const { source, preferences, selectedObject, setSelectedObject, result, status, openImagePicker } = useWorkspace();
+  const { source, preferences, selectedObject, setSelectedObject, result, status, openImagePicker, parameters } = useWorkspace();
+  const title = detectorLabel(kind, explicitDetector ?? result?.parameters_used.detector ?? parameters.detector) ?? TITLES[kind];
   const ownRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = exportRef ?? ownRef;
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const demo = source.kind === "demo" && preferences.demoVisuals;
-  const computedUrl = placeholderOnly ? null : resultImage(result, kind);
+  const computedUrl = explicitImage ?? (placeholderOnly ? null : resultImage(result, kind));
   const imageUrl = computedUrl || (source.kind === "image" && kind === "original" ? source.url : null);
-  const unsupported = placeholderOnly || kind === "contours";
-  const welcome = source.kind === "empty" && !placeholderOnly;
+  const unsupported = placeholderOnly || (kind === "contours" && result?.contour_image === null);
+  const welcome = source.kind === "empty" && !placeholderOnly && kind !== "laplacian";
   useEffect(() => {
     if (demo && canvasRef.current)
       drawIllustration(canvasRef.current, kind, selectedObject, preferences.grid);
@@ -289,14 +301,14 @@ export function VisualSurface({
           height={480}
           className="sample-canvas"
           role="img"
-          aria-label={`Illustrative ${TITLES[kind].toLowerCase()} of four calibration shapes; not a calculated result.`}
+          aria-label={`Illustrative ${title.toLowerCase()} of four calibration shapes; not a calculated result.`}
           style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
         />
       ) : imageUrl ? (
         <img
           className="local-image"
           src={imageUrl}
-          alt={`${TITLES[kind]} of ${source.name}${computedUrl ? " · computed by Python" : " · local preview"}`}
+          alt={`${title} of ${source.name}${computedUrl ? " · computed by Python" : " · local preview"}`}
           style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
           draggable={false}
         />
@@ -304,7 +316,7 @@ export function VisualSurface({
         <div className={`signal-welcome ${kind === "original" ? "signal-welcome-main" : "signal-welcome-stage"}`}>
           <img
             src={`/images/${SIGNAL_ART[kind]}.png`}
-            alt={`Conceptual ${TITLES[kind].toLowerCase()} artwork; not a computed result`}
+            alt={`Conceptual ${title.toLowerCase()} artwork; not a computed result`}
             className="signal-welcome-art"
             draggable={false}
           />
@@ -320,7 +332,7 @@ export function VisualSurface({
           <ImageOff size={24} strokeWidth={1.25} />
           <strong>{unsupported ? "Not implemented" : status === "loading" ? "Calculating in Python…" : status === "outdated" ? "Results out of date" : "Awaiting analysis"}</strong>
           <span>
-            {unsupported ? placeholderOnly ? "Detector comparison is not implemented." : "Contours and object analysis have not run." : source.kind === "image"
+            {unsupported ? placeholderOnly ? "Run detector comparison to calculate this edge map." : "Contours and object analysis have not run." : source.kind === "image"
               ? "Click Process image to calculate with the current settings."
               : "Upload an image, or open the separate illustrative example."}
           </span>
@@ -356,22 +368,35 @@ export function VisualizationCard({
   index,
   large = false,
   detector,
+  comparisonResult,
+  comparisonDimensions,
   selected = false,
 }: {
   kind: Visualization;
   index: string;
   large?: boolean;
-  detector?: string;
+  detector?: Detector;
+  comparisonResult?: ComparisonDetectorResult | null;
+  comparisonDimensions?: { width: number; height: number };
   selected?: boolean;
 }) {
-  const { source, preferences, notify, result } = useWorkspace();
+  const { source, preferences, notify, result, parameters } = useWorkspace();
+  const activeDetector = detector ?? result?.parameters_used.detector ?? parameters.detector;
+  const title = detectorLabel(kind, activeDetector) ?? TITLES[kind];
+  const display = detectorDisplay(activeDetector);
+  const description = kind === "gx" || kind === "gy" || kind === "laplacian"
+    ? `${display.signed_min} black / 0 gray / +${display.signed_max} white`
+    : kind === "gradient" ? display.magnitude_max === null ? "Illustrative gradient artwork" : `Fixed display scale / 0 to ${display.magnitude_max.toFixed(1)} raw units`
+    : kind === "edges" && activeDetector === "Laplacian" ? "Zero crossings / raw contrast > threshold / 0 or 255"
+    : kind === "noisy" && result && result.noise.model !== "None"
+      ? `${result.noise.model} / ${result.noise.strength} ${result.noise.units} / seed ${result.noise.seed}`
+    : DESCRIPTIONS[kind];
   const [inspect, setInspect] = useState(false);
   const [zoom, setZoom] = useState(1);
   const exportRef = useRef<HTMLCanvasElement>(null);
-  // Compare remains a placeholder. Never label one Sobel result as Prewitt
-  // or Laplacian simply because all three panels share this component.
-  const computedUrl = detector ? null : resultImage(result, kind);
-  const dimensions = computedUrl && result ? result.analyzed_dimensions : source;
+  const computedUrl = comparisonResult?.edge_map ?? (detector ? null : resultImage(result, kind));
+  const dimensions = comparisonResult && comparisonDimensions ? comparisonDimensions
+    : computedUrl && result ? result.analyzed_dimensions : source;
   const canView = Boolean(computedUrl) || (
     source.kind === "demo"
       ? preferences.demoVisuals
@@ -379,7 +404,7 @@ export function VisualizationCard({
   const save = () => {
     if (computedUrl) {
       downloadFile(computedUrl, `spectraedge-computed-${kind}.png`);
-      notify(`${TITLES[kind]} exported · computed display PNG, not raw numerical data.`);
+      notify(`${title} exported · computed display PNG, not raw numerical data.`);
       return;
     }
     if (source.kind === "image" && kind === "original") {
@@ -398,17 +423,17 @@ export function VisualizationCard({
         <header className="instrument-header">
           <div>
             <span className="panel-index">{index}</span>
-            <h2>{TITLES[kind]}</h2>
+            <h2>{title}</h2>
             {large && (
               <span className="tag">{source.kind === "demo" ? "REFERENCE" : "SOURCE"}</span>
             )}
           </div>
           <div className="card-tools">
-            <IconButton label={`Download ${TITLES[kind].toLowerCase()}`} disabled={!computedUrl && !(source.kind === "image" && kind === "original")} onClick={save}>
+            <IconButton label={`Download ${title.toLowerCase()}`} disabled={!computedUrl && !(source.kind === "image" && kind === "original")} onClick={save}>
               <Download size={13} />
             </IconButton>
             <IconButton
-              label={`Inspect ${TITLES[kind].toLowerCase()}`}
+              label={`Inspect ${title.toLowerCase()}`}
               disabled={!canView}
               onClick={() => {
                 setZoom(1.5);
@@ -418,7 +443,7 @@ export function VisualizationCard({
               <ZoomIn size={13} />
             </IconButton>
             <IconButton
-              label={`Expand ${TITLES[kind].toLowerCase()}`}
+              label={`Expand ${title.toLowerCase()}`}
               disabled={!canView}
               onClick={() => {
                 setZoom(1);
@@ -429,9 +454,11 @@ export function VisualizationCard({
             </IconButton>
           </div>
         </header>
-        <VisualSurface key={(result?.request_id ?? source.url) + kind} kind={kind} placeholderOnly={Boolean(detector)} />
+        <VisualSurface key={(result?.request_id ?? source.url) + kind + (detector ?? "")} kind={kind}
+          placeholderOnly={Boolean(detector && !comparisonResult)} explicitImage={comparisonResult?.edge_map}
+          explicitDetector={detector} />
         <footer className="instrument-footer">
-          <span>{large ? source.name : DESCRIPTIONS[kind]}</span>
+          <span>{large ? source.name : description}</span>
           <span>
             {computedUrl || large
               ? `${dimensions.width} × ${dimensions.height}${computedUrl ? " · analyzed" : ""}`
@@ -441,7 +468,7 @@ export function VisualizationCard({
       </section>
       {inspect && (
         <Modal
-          title={TITLES[kind]}
+          title={title}
           eyebrow={
             source.kind === "demo"
               ? "DEMO INSPECTOR · ILLUSTRATIVE DATA"
@@ -483,7 +510,9 @@ export function VisualizationCard({
             zoom={zoom}
             interactive
             exportRef={exportRef}
-            placeholderOnly={Boolean(detector)}
+            placeholderOnly={Boolean(detector && !comparisonResult)}
+            explicitImage={comparisonResult?.edge_map}
+            explicitDetector={detector}
           />
           <div className="inspector-footer">
             <ScanLine size={13} />

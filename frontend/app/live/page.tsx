@@ -1,4 +1,4 @@
-import Workspace from "@/components/workspace";
+import LiveWorkspace from "@/components/live-workspace";
 export default function LivePage() {
-  return <Workspace view="live" />;
+  return <LiveWorkspace />;
 }

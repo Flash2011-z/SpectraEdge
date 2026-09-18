@@ -2,7 +2,7 @@
 
 **SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System**
 
-A two-person CSE 220 project. The website demonstrates actual Python grayscale preparation, manual Gaussian convolution, **manual Sobel gradients and adjustable thresholding**, and manual Fourier analysis. Prewitt, Laplacian, contours, object measurements, noise experiments, multi-scale processing, detector comparison, and webcam processing are **not implemented**.
+A two-person CSE 220 project. The website demonstrates Python grayscale preparation, manual Gaussian convolution, Sobel/Prewitt gradients, signed Laplacian responses, adjustable edge decisions, detector comparison, multi-scale edge persistence, connected-region boundary measurements, manual Fourier analysis, reproducible noise experiments, and live webcam processing.
 
 **[Object Cutout](docs/OBJECT_CUTOUT.md)** at `/cutout` defaults to manual Gaussian/Sobel elevation driving library-backed watershed. Draw a rectangle with a background margin and extract directly: starting regions use the dominant background colour and low-gradient interiors. Best with a fairly uniform background; the object may touch the photo edge. Keep/Remove brushes are optional corrections. Inspect edge guidance and download a transparent PNG. OpenCV GrabCut remains a separate comparison method; FFT is not used for cutout. Photos are prepared at up to 512 pixels per side before selection. Install `backend/requirements.txt` in the existing virtual environment and restart Python after backend changes.
 
@@ -13,7 +13,7 @@ portrait model. It is never required by Analyze, manual watershed or GrabCut.
 Install `backend/requirements-ai.txt` and run `python -m backend.prepare_ai` with
 the backend virtual environment only if AI is wanted. Manual mode stays default.
 
-Requires Python 3.12+ and Node.js 22.13+. Tested with Python 3.14.5. Run from `D:\SpectraEdge`.
+Requires Python 3.12+ and Node.js 22.13+. Run from your SpectraEdge project directory; replace the example `D:\SpectraEdge` path below with your checkout location.
 
 Install once:
 
@@ -62,9 +62,27 @@ Keep this demonstration bound to loopback; it is not an authenticated public upl
 2. Keep **Sobel**, sigma **1.2**, and threshold **96**; use the suggested Gaussian kernel and click **Process image**.
 3. Inspect the blur, signed Gx/Gy, gradient magnitude, and edge map. Gx is positive toward brighter pixels on the right; Gy is positive toward brighter pixels below. Gray in a derivative image means zero, not a medium-strength edge.
 4. Keep the same image, sigma, and kernel. Increase threshold to **200**, then **500**, processing after each change. Weaker edges disappear; no new edge pixels can be added. At **1443**, none remain. The precise pattern depends on the image.
-5. Point out the actual **analyzed dimensions**, **processing time**, and completed stages. Status says **edges computed**, while objects remain **unavailable**, not zero.
+5. Point out the actual **analyzed dimensions**, **processing time**, completed stages, and connected foreground measurements.
 6. Download a computed PNG from a card/inspector. Export session downloads actual metadata, without image bytes.
 7. Change settings while processing or reset: outdated responses are ignored. Stop Python and Process to demonstrate an actionable connection error; restart it and retry.
+
+Open **Compare** with an uploaded image and select **Compare detectors** to run
+Sobel, Prewitt, and Laplacian from one decoded and Gaussian-filtered signal.
+Each card reports its binary edge output, connected-object count, detector
+processing time, threshold type, and threshold value. Sobel and Prewitt have
+independent raw magnitude thresholds; Laplacian has a separate raw
+zero-crossing contrast threshold.
+
+For a multi-scale demonstration, enable **Multi-scale**, keep the default scales
+0.8, 1.6, and 3.2, and require support from two scales. Each scale starts from
+the same grayscale source. The persistence image shows the number of agreeing
+scale masks as grayscale, while the fused mask is white where at least two
+scales selected the same pixel. Object measurements use that fused mask; the
+normal detector cards continue to show the selected single-scale result.
+
+For **Noise**, choose Gaussian (intensity standard deviation) or Salt & Pepper (pixel corruption probability), set strength, and process. Seed 220 makes repeated runs reproducible. The noisy input feeds smoothing, detection, multi-scale, and the input spectrum; the clean grayscale card remains available. Compare uses clean shared preprocessing.
+
+For **Live**, open `/live`, select **Start camera**, and grant camera access on localhost or HTTPS. Each captured frame produces grayscale, Gaussian-filtered, edge, and input-spectrum outputs at up to 256 pixels per side. Detector, sigma, kernel, and threshold are adjustable. Stop releases the webcam; retry is available after processing errors. Frames remain in memory.
 
 The **Illustrative example** is separate, labelled artwork with preset object values. Its Process button is disabled; it is not a calculated detector result.
 
@@ -95,16 +113,14 @@ Raw derivatives remain signed floats and can exceed 255. Display PNGs are separa
 - Limits: 20 MiB per file, 20 million decoded pixels, one image per request. The preview fits within **512 × 512**, preserves aspect ratio, and is never upscaled.
 - EXIF orientation is applied, transparency is composited on white, and animated images use frame zero. Nearest-neighbour preview resizing can alias very fine detail; analyzed dimensions are always shown.
 - Gaussian and Fourier calculations use the unchanged manual `signal_ops` modules. Sobel reuses manual convolution; thresholding uses raw magnitudes. Only binary decisions and display PNGs become uint8. Both spectra use one combined maximum.
-- Browser cancellation prevents stale results but cannot interrupt a Python calculation already running. One calculation runs at a time; overlap receives a retryable busy response.
+- Browser cancellation prevents stale results but cannot interrupt a Python calculation already running. Analyze and Compare share one processing slot; Live has its own slot. Overlap within each slot receives a retryable busy response. Live accepts frames up to 2 MiB and fits them within 256 pixels per side.
 
 ## Checks
 
 From the project root:
 
 ```powershell
-.\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests/signal_ops -p "test_*.py" -v
-.\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests/detection -p "test_*.py" -v
-.\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests -p "test_api.py" -v
+.\backend\.venv\Scripts\python.exe -B -m unittest discover -s backend/tests -p "test_*.py" -v
 npm.cmd run check
 npm.cmd run build
 ```
@@ -113,6 +129,7 @@ With Python running, exercise the **actual frontend API adapter over HTTP**:
 
 ```powershell
 npm.cmd --prefix frontend run test:integration
+npm.cmd --prefix frontend run test:live-integration
 ```
 
 This checks real PNG uploads and errors, but is not a browser interaction test. Use the teacher sequence for file picking, visual comparison, zoom, and downloads.
@@ -120,9 +137,12 @@ This checks real PNG uploads and errors, but is not a browser interaction test. 
 ## Structure and ownership handoff
 
 - `frontend/`: React/TypeScript website, API adapter, shared result/request state, and tests. Owned by the frontend/signal-operations contributor.
-- `backend/signal_ops/` and its tests: existing array-only convolution, Gaussian, DFT, and FFT modules. Same owner; no algorithm duplication in the API.
+- `backend/signal_ops/` and its tests: array-only convolution, Gaussian, reproducible noise, DFT, and FFT modules. Same owner; no algorithm duplication in the API.
 - `backend/detection/sobel.py`, `threshold.py`, and their tests: Sobel/basic threshold milestone completed by the frontend/signal-operations contributor. Array-only imports: `from backend.detection import sobel, threshold_edges`.
-- `backend/app.py` and `backend/tests/test_api.py`: extended for this milestone; **hand off to the teammate for remaining API/pipeline development**. Existing dependency files are unchanged.
-- Prewitt, Laplacian, contours, object measurements, noise experiments, multi-scale processing, remaining pipeline, and camera work belong to the teammate. Coordinate future API contract changes through the frontend owner; do not edit the frontend independently.
+- `backend/app.py` and `backend/tests/test_api.py`: multipart integration and response contract for detector, object, and optional multi-scale analysis. Existing dependency files are unchanged.
+- `backend/detection/prewitt.py` and `laplacian.py`: manual Prewitt, signed Laplacian, and separate zero-crossing decisions, exported by `backend.detection` and selectable through `/analyze`.
+- `backend/analysis/components.py` provides manual eight-connected component labeling, outer/hole boundary masks, and object measurements. `backend/analysis/multiscale.py` runs independent Gaussian/detector passes and persistence fusion. `backend/signal_ops/noise.py` supplies seeded Gaussian and Salt & Pepper experiments without changing detector algorithms.
+- `backend/live_api.py` handles bounded webcam frames through the same numerical modules. `frontend/components/live-workspace.tsx` and its camera/analysis hooks own the Live lifecycle.
+- `backend/analysis/comparison.py` performs one Gaussian pass followed by all three existing detector, edge-decision, and object-analysis paths for `POST /compare`.
 
 See [backend/README.md](backend/README.md) for the multipart/JSON contract and [frontend/README.md](frontend/README.md) for integration details. This remains one Git repository. No automatic commits, pushes, or deployments.

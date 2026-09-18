@@ -16,14 +16,16 @@ import {
   EMPTY_SOURCE,
   MAX_DECODED_PIXELS,
   analysisSettings,
+  comparisonSettings,
   restoreParameters,
   validateImage,
   type Parameters,
   type Preferences,
   type SourceImage,
   type ComputedAnalysisResult,
+  type ComparisonResult,
 } from "@/lib/workspace";
-import { createAnalysisRunner } from "@/lib/api";
+import { createAnalysisRunner, createComparisonRunner } from "@/lib/api";
 
 function useWorkspaceState() {
   const [parameters, setParameters] = useState<Parameters>(DEFAULT_PARAMETERS);
@@ -34,9 +36,14 @@ function useWorkspaceState() {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "outdated">("idle");
   const [error, setError] = useState("");
   const [requests] = useState(createAnalysisRunner);
+  const [comparisonRequests] = useState(createComparisonRunner);
+  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  const [comparisonStatus, setComparisonStatus] = useState<"idle" | "loading" | "success" | "error" | "outdated">("idle");
+  const [comparisonError, setComparisonError] = useState("");
   const [stage, setStage] = useState(0);
   const [selectedObject, setSelectedObject] = useState(3);
   const busy = status === "loading";
+  const comparisonBusy = comparisonStatus === "loading";
   const [loadingImage, setLoadingImage] = useState(false);
   const [notice, setNotice] = useState("");
   const [hydrated, setHydrated] = useState(false);
@@ -48,10 +55,21 @@ function useWorkspaceState() {
   const imageRequest = useRef(0);
   const invalidate = useCallback(() => {
     requests.cancel();
+    comparisonRequests.cancel();
     setResult(null);
+    setComparisonResult(null);
     setError("");
+    setComparisonError("");
     setStatus((previous) => ["success", "loading", "outdated"].includes(previous) ? "outdated" : "idle");
-  }, [requests]);
+    setComparisonStatus((previous) => ["success", "loading", "outdated"].includes(previous) ? "outdated" : "idle");
+  }, [requests, comparisonRequests]);
+  const invalidateComparison = useCallback(() => {
+    comparisonRequests.cancel();
+    setComparisonResult(null);
+    setComparisonError("");
+    setComparisonStatus((previous) => ["success", "loading", "outdated"].includes(previous)
+      ? "outdated" : "idle");
+  }, [comparisonRequests]);
   const notify = useCallback((message: string) => setNotice(message), []);
   useEffect(() => {
     try {
@@ -72,12 +90,13 @@ function useWorkspaceState() {
     setHydrated(true);
     return () => {
       requests.cancel();
+      comparisonRequests.cancel();
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       // This counter cancels decoding callbacks; it is not a rendered DOM ref.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       imageRequest.current++;
     };
-  }, [requests]);
+  }, [requests, comparisonRequests]);
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -100,6 +119,14 @@ function useWorkspaceState() {
       setParameters((p) => ({ ...p, [key]: value }));
     },
     [invalidate],
+  );
+  const updateComparisonParameter = useCallback(
+    <K extends "comparisonSobelThreshold" | "comparisonPrewittThreshold" |
+      "comparisonLaplacianContrastThreshold">(key: K, value: Parameters[K]) => {
+      invalidateComparison();
+      setParameters((previous) => ({ ...previous, [key]: value }));
+    },
+    [invalidateComparison],
   );
   const reset = useCallback(() => {
     imageRequest.current++;
@@ -156,9 +183,6 @@ function useWorkspaceState() {
           height: image.naturalHeight,
         });
         setFile(file);
-        // An old illustrative Prewitt/Laplacian preference cannot select an
-        // unimplemented detector for a real upload.
-        setParameters((previous) => ({ ...previous, detector: "Sobel" }));
         setStatus("idle");
         setLoadingImage(false);
         setStage(0);
@@ -176,9 +200,9 @@ function useWorkspaceState() {
     [invalidate, notify],
   );
   const process = useCallback(() => {
-    if (busy || loadingImage) return;
+    if (busy || comparisonBusy || loadingImage) return;
     if (!file || source.kind !== "image") {
-      notify("Upload an image to run real Gaussian, Sobel, and Fourier analysis. The calibration example is illustrative only.");
+      notify("Upload an image to run Gaussian, edge detection, and Fourier analysis. The calibration example is illustrative only.");
       return;
     }
     setStatus("loading");
@@ -190,11 +214,32 @@ function useWorkspaceState() {
         setResult(computed);
         setStatus("success");
         setStage(4);
-        notify("Sobel edges and Fourier analysis complete. Objects have not been analyzed.");
+        notify(`${computed.parameters_used.detector} edges, connected objects, and Fourier analysis complete.`);
       },
       error: (message) => { setStatus("error"); setError(message); },
     });
-  }, [busy, loadingImage, file, source.kind, parameters, requests, notify]);
+  }, [busy, comparisonBusy, loadingImage, file, source.kind, parameters, requests, notify]);
+  const processComparison = useCallback(() => {
+    if (busy || comparisonBusy || loadingImage) return;
+    if (!file || source.kind !== "image") {
+      notify("Upload an image before running detector comparison.");
+      return;
+    }
+    setComparisonStatus("loading");
+    setComparisonError("");
+    setComparisonResult(null);
+    void comparisonRequests.run(file, comparisonSettings(parameters), {
+      success: (computed) => {
+        setComparisonResult(computed);
+        setComparisonStatus("success");
+        notify("Sobel, Prewitt, and Laplacian comparison complete.");
+      },
+      error: (message) => {
+        setComparisonStatus("error");
+        setComparisonError(message);
+      },
+    });
+  }, [busy, comparisonBusy, loadingImage, file, source.kind, parameters, comparisonRequests, notify]);
   return {
     parameters,
     preferences,
@@ -206,18 +251,24 @@ function useWorkspaceState() {
     setSelectedObject,
     busy,
     result,
+    comparisonResult,
+    comparisonStatus,
+    comparisonError,
     status,
     error,
-    canProcess: file !== null && !loadingImage && !busy,
+    canProcess: file !== null && !loadingImage && !busy && !comparisonBusy,
+    canCompare: file !== null && !loadingImage && !busy && !comparisonBusy,
     loadingImage,
     notice,
     notify,
     openImagePicker,
     updateParameter,
+    updateComparisonParameter,
     reset,
     loadDemo,
     loadImage,
     process,
+    processComparison,
   };
 }
 type WorkspaceState = ReturnType<typeof useWorkspaceState>;

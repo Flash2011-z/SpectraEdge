@@ -11,7 +11,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { useState } from "react";
-import { KERNEL_SIZES, MAX_THRESHOLD, type Detector, type Parameters } from "@/lib/workspace";
+import { KERNEL_SIZES, MAX_THRESHOLD, thresholdLabel, type Detector, type Parameters } from "@/lib/workspace";
 import { useWorkspace } from "./workspace-provider";
 import { Help, RangeControl } from "./ui";
 
@@ -72,7 +72,7 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
         </button>
         <button className="button subtle full" onClick={onCamera}>
           <Camera size={13} />
-          Camera input<span className="soon">SOON</span>
+          Camera input<span className="soon">LIVE</span>
         </button>
         <div className="source-chip">
           <FileImage size={12} />
@@ -95,14 +95,13 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.detector === name ? "selected" : ""}
               aria-pressed={p.detector === name}
-              disabled={name !== "Sobel"}
               onClick={() => update("detector", name)}
             >
               {name}
             </button>
           ))}
         </div>
-        <p className="control-hint">Manual Sobel · Prewitt and Laplacian are not implemented.</p>
+        <p className="control-hint">{p.detector === "Laplacian" ? "Signed second derivative with zero-crossing edge selection." : "Signed Gx and Gy with gradient magnitude edge selection."}</p>
       </section>
       <section className="control-section">
         <h2>
@@ -137,11 +136,51 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           </span>
         </div>
         <p className="control-hint">
-          {p.sigma === 0 ? "Sigma 0 returns the grayscale image unchanged." : `Suggested support: ${suggestedKernel} × ${suggestedKernel} (about ±3σ).`}
+          {p.sigma === 0 ? "Sigma 0 returns the analysis input unchanged, including any selected noise." : `Suggested support: ${suggestedKernel} × ${suggestedKernel} (about ±3σ).`}
         </p>
         {p.sigma > 0 && p.kernel !== suggestedKernel && (
           <button className="text-button" onClick={() => update("kernel", suggestedKernel)}>Use suggested kernel</button>
         )}
+        <label className="select-row">
+          <span>Multi-scale analysis</span>
+          <input
+            type="checkbox"
+            checked={p.multiScale}
+            onChange={(event) => update("multiScale", event.target.checked)}
+          />
+        </label>
+        {p.multiScale && <>
+          {p.scaleSigmas.map((sigma, index) => (
+            <div className="select-row" key={index}>
+              <label htmlFor={`scale-sigma-${index}`}>Scale {index + 1} sigma</label>
+              <input
+                id={`scale-sigma-${index}`}
+                type="number"
+                className="scale-input"
+                min={0}
+                max={5}
+                step={0.1}
+                value={sigma}
+                onChange={(event) => {
+                  const values = [...p.scaleSigmas];
+                  values[index] = Number(event.target.value);
+                  update("scaleSigmas", values);
+                }}
+              />
+            </div>
+          ))}
+          <div className="select-row">
+            <label htmlFor="scale-support">Required scale support</label>
+            <span className="select-wrap">
+              <select id="scale-support" value={p.scaleSupport}
+                onChange={(event) => update("scaleSupport", Number(event.target.value))}>
+                {p.scaleSigmas.map((_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
+              </select>
+              <ChevronDown size={12} aria-hidden="true" />
+            </span>
+          </div>
+          <p className="control-hint">Each scale starts from the same grayscale analysis input, including any selected noise. A fused edge needs support from at least {p.scaleSupport} of {p.scaleSigmas.length} scales.</p>
+        </>}
       </section>
       <section className="control-section">
         <h2>
@@ -149,25 +188,29 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
           <span className="section-number">04</span>
         </h2>
         <RangeControl
-          label="Threshold"
-          help="Raw Sobel magnitude units, not normalized brightness. A pixel is an edge only when sqrt(Gx² + Gy²) is strictly greater than this value."
+          label={thresholdLabel(p.detector)}
+          help={p.detector === "Laplacian"
+            ? "Horizontal/vertical opposite-sign responses must differ by more than this value. Both endpoints are marked. An exact-zero centre is marked only between opposite-sign neighbours; wider zero plateaus are not bridged. Equality is excluded."
+            : `Raw ${p.detector} magnitude units. A pixel is an edge only when sqrt(Gx² + Gy²) is strictly greater than this value.`}
           min={0}
           max={MAX_THRESHOLD}
           value={p.threshold}
           disabled={source.kind !== "image"}
           onChange={(v) => update("threshold", v)}
         />
-        <p className="control-hint">Raw magnitude &gt; threshold · 0–1443. Higher values keep stronger edges. Process again after changing it.</p>
+        <p className="control-hint">{p.detector === "Laplacian"
+          ? "Sign change and raw response difference > threshold · 0–1443. The maximum may retain strong crossings."
+          : "Raw magnitude > threshold · 0–1443. Higher values keep stronger edges."} Process again after changing it.</p>
         <RangeControl
-          label="Minimum area"
-          help="Contours with a smaller enclosed area will be ignored."
-          min={0}
-          max={5000}
-          step={50}
-          unit=" px²"
-          value={p.minimumArea}
-          disabled
-          onChange={(v) => update("minimumArea", v)}
+          label="Laplacian minimum component area"
+          help="Before contour and object analysis, remove eight-connected Laplacian edge fragments smaller than this area. The raw zero-crossing edge map remains unchanged. One disables cleanup."
+          min={1}
+          max={100}
+          step={1}
+          unit=" px"
+          value={p.laplacianMinimumComponentArea}
+          disabled={source.kind !== "image" || p.detector !== "Laplacian"}
+          onChange={(v) => update("laplacianMinimumComponentArea", v)}
         />
       </section>
       <details className="control-section noise-section" open>
@@ -184,8 +227,11 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
               key={name}
               className={p.noise === name ? "selected" : ""}
               aria-pressed={p.noise === name}
-              disabled
-              onClick={() => update("noise", name)}
+              onClick={() => {
+                update("noise", name);
+                if (name === "Gaussian") update("noiseStrength", 12);
+                if (name === "Salt & Pepper") update("noiseStrength", 0.12);
+              }}
             >
               {name}
             </button>
@@ -193,14 +239,21 @@ export function ParametersPanel({ open, onCamera }: { open: boolean; onCamera: (
         </div>
         <RangeControl
           label="Noise strength"
-          help="The amount of synthetic noise to add in a future noise experiment."
+          help={p.noise === "Salt & Pepper"
+            ? "Probability that each pixel is replaced with black or white."
+            : "Standard deviation of zero-mean Gaussian noise in intensity units."}
           min={0}
-          max={100}
+          max={p.noise === "Salt & Pepper" ? 1 : 100}
+          step={p.noise === "Salt & Pepper" ? 0.01 : 1}
           value={p.noiseStrength}
-          unit="%"
-          disabled
+          unit={p.noise === "Salt & Pepper" ? " probability" : " intensity σ"}
+          disabled={p.noise === "None"}
           onChange={(v) => update("noiseStrength", v)}
         />
+        <p className="control-hint">
+          {p.noise === "None" ? "Noise is disabled." :
+            `Units: ${p.noise === "Gaussian" ? "intensity standard deviation" : "pixel corruption probability"}.`}
+        </p>
       </details>
       <button
         className="button primary full process-button"

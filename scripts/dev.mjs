@@ -47,7 +47,7 @@ async function healthy() {
   try {
     const response = await fetch('http://127.0.0.1:8000/health', { signal: AbortSignal.timeout(1000) });
     const data = await response.json();
-    return response.ok && data.status === 'ok' && data.milestone === 'sobel-threshold';
+    return response.ok && data.status === 'ok' && data.milestone === 'noise-experiments';
   } catch { return false; }
 }
 
