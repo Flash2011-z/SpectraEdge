@@ -2,16 +2,34 @@
 
 **SpectraEdge: A Multi-Scale Multi-Object Edge Detection and Frequency-Domain Analysis System**
 
-A two-person CSE 220 project. The website demonstrates Python grayscale preparation, manual Gaussian convolution, Sobel/Prewitt gradients, signed Laplacian responses, adjustable edge decisions, detector comparison, multi-scale edge persistence, connected-region boundary measurements, manual Fourier analysis, reproducible noise experiments, and live webcam processing.
+A two-person CSE 220 project that has progressed from manual image-signal processing to an interactive analysis website with detector comparison, live webcam analysis, and transparent object extraction. The mathematical core includes manual Gaussian convolution, Sobel/Prewitt gradients, signed Laplacian responses, multi-scale edge persistence, connected-region boundary measurements, Fourier analysis, and reproducible noise experiments. Optional pretrained AI extends portrait cutout while keeping the course's manual calculations available separately.
+
+## Current project progress
+
+| Workspace | Implemented capabilities |
+| --- | --- |
+| **Analyze** (`/`) | Image preparation, Gaussian smoothing, three edge detectors, adjustable thresholds, spatial and frequency views, connected-region measurements, PNG and metadata exports. |
+| **Multi-scale and Noise** (within Analyze) | Edge persistence across selected scales, support-based fusion, and seeded Gaussian or Salt & Pepper noise experiments. |
+| **Compare** (`/compare`) | Sobel, Prewitt, and Laplacian outputs from shared preprocessing, with independent thresholds, object counts, and processing times. |
+| **Live Signal Analyzer** (`/live`) | Webcam preview and four synchronized processed outputs: grayscale, Gaussian filtered, edge map, and Fourier spectrum. |
+| **Live Signal Monitor** (within Live) | Camera status and source resolution, current processing parameters, backend processing time, capture-to-display latency, and approximate processed-output FPS. |
+| **Object Cutout** (`/cutout`) | Rectangle selection, optional Keep/Remove brushes, mask inspection, and full-frame or trimmed transparent PNG export using three selectable methods. |
+
+### Object Cutout methods
+
+| Method | Implementation and intended use |
+| --- | --- |
+| **Edge-guided watershed** (default) | Manual Gaussian/Sobel elevation with scikit-image watershed. Automatic starting regions support extraction without initial brush marks; best with a fairly uniform background. |
+| **GrabCut** | OpenCV segmentation as a separate comparison method, using the selection and optional brush corrections. |
+| **AI-assisted cutout** (optional) | Local BiRefNet Portrait inference through rembg and ONNX Runtime on CPU. Produces a soft foreground mask while preserving source RGB. Requires separate package and model installation. |
+
+The Live monitor reports processed-output FPS rather than camera capture FPS. Its latency includes capture, request, and display; backend processing time measures server work separately. The Fourier view uses the grayscale input, independently of the edge output.
+
+AI libraries and weights load only when AI extraction is requested. This is a pretrained portrait extension; the project does not train the model. Manual Gaussian, Sobel, and Fourier implementations remain separate from library-backed segmentation.
 
 **[Object Cutout](docs/OBJECT_CUTOUT.md)** at `/cutout` defaults to manual Gaussian/Sobel elevation driving library-backed watershed. Draw a rectangle with a background margin and extract directly: starting regions use the dominant background colour and low-gradient interiors. Best with a fairly uniform background; the object may touch the photo edge. Keep/Remove brushes are optional corrections. Inspect edge guidance and download a transparent PNG. OpenCV GrabCut remains a separate comparison method; FFT is not used for cutout. Photos are prepared at up to 512 pixels per side before selection. Install `backend/requirements.txt` in the existing virtual environment and restart Python after backend changes.
 
 ## Windows setup and startup
-
-Optional: [AI-assisted cutout setup](docs/AI_CUTOUT.md) adds a user-selected local
-portrait model. It is never required by Analyze, manual watershed or GrabCut.
-Install `backend/requirements-ai.txt` and run `python -m backend.prepare_ai` with
-the backend virtual environment only if AI is wanted. Manual mode stays default.
 
 Requires Python 3.12+ and Node.js 22.13+. Run from your SpectraEdge project directory; replace the example `D:\SpectraEdge` path below with your checkout location.
 
@@ -23,6 +41,21 @@ python -m venv backend/.venv
 .\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 npm.cmd run setup
 ```
+
+### Optional AI model installation
+
+After base setup, run these commands from the project root to enable AI-assisted cutout:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-ai.txt
+.\backend\.venv\Scripts\python.exe -B -m backend.prepare_ai
+```
+
+This installs rembg 2.0.84 and ONNX Runtime 1.29.0, downloads approximately **973 MB** of BiRefNet Portrait weights, and verifies the pinned checksum. The model is stored in `backend/.models/birefnet-portrait.onnx`; weights and the virtual environment are ignored by Git, so each new checkout needs its own setup. Downloading requires internet access; extraction uses the local model and does not send photos to a cloud AI service. No GPU is required.
+
+Restart the backend after installation. First use loads the model and can take substantial time and memory; subsequent requests reuse the session. Analyze, Compare, Live, watershed, and GrabCut work without this optional setup. See [AI-assisted cutout](docs/AI_CUTOUT.md) for details and limitations.
+
+### Start the application
 
 Start both Python and the website with one command and keep the terminal open:
 
@@ -84,6 +117,12 @@ For **Noise**, choose Gaussian (intensity standard deviation) or Salt & Pepper (
 
 For **Live**, open `/live`, select **Start camera**, and grant camera access on localhost or HTTPS. Each captured frame produces grayscale, Gaussian-filtered, edge, and input-spectrum outputs at up to 256 pixels per side. Detector, sigma, kernel, and threshold are adjustable. Stop releases the webcam; retry is available after processing errors. Frames remain in memory.
 
+Use the **Live Signal Monitor** below the camera preview to explain the source resolution, active parameters, and timing measurements. The source preview runs independently; the four processed outputs belong to the same captured frame. Invalid settings pause requests, and stale results are hidden after settings change.
+
+For **Object Cutout**, upload a photo at `/cutout`, draw a rectangle with a background margin, and use **Extract object** with the default watershed method. Inspect the mask and edge guidance, optionally refine with Keep/Remove, and download a transparent PNG. Switch to GrabCut to compare segmentation methods.
+
+For **AI-assisted cutout**, complete the optional installation, select **AI-assisted cutout — optional**, and click **Extract object**. With no rectangle, the model uses the whole photo; **Reset selection** restores this behavior. A rectangle restricts retained output rather than prompting a particular person. Keep/Remove brushes directly correct opacity. The portrait model may need corrections around hair, multiple people, or unfamiliar objects; exports retain the prepared resolution of at most 512 pixels per side.
+
 The **Illustrative example** is separate, labelled artwork with preset object values. Its Process button is disabled; it is not a calculated detector result.
 
 For a smoothing comparison, set sigma to **0** and process: grayscale/blur and both spectra match. Then set sigma to **2**, use the suggested 13 × 13 kernel, and process again. Compare the Fourier pair on its shared scale. Changing sigma changes the gradient signal too, so hold it fixed when demonstrating threshold alone.
@@ -108,14 +147,25 @@ Raw derivatives remain signed floats and can exceed 255. Display PNGs are separa
 
 ## Data and calculation boundaries
 
-- Selecting an image stays local until Process sends its File to the configured Python address.
+- In Analyze, selecting an image stays local until Process sends its File to the configured Python address. Object Cutout uploads on selection to prepare the editable image. Live sends captured frames while the camera is active and processing settings are valid.
 - Uploads and results stay in memory. The server saves no images or result history. Reloading discards session images/results; only device preferences/settings persist.
 - Limits: 20 MiB per file, 20 million decoded pixels, one image per request. The preview fits within **512 × 512**, preserves aspect ratio, and is never upscaled.
-- EXIF orientation is applied, transparency is composited on white, and animated images use frame zero. Nearest-neighbour preview resizing can alias very fine detail; analyzed dimensions are always shown.
+- EXIF orientation is applied and animated images use frame zero. Analyze composites transparency on white; Object Cutout preserves RGBA and combines source alpha with the segmentation mask. Nearest-neighbour preview resizing can alias very fine detail; analyzed dimensions are always shown.
 - Gaussian and Fourier calculations use the unchanged manual `signal_ops` modules. Sobel reuses manual convolution; thresholding uses raw magnitudes. Only binary decisions and display PNGs become uint8. Both spectra use one combined maximum.
 - Browser cancellation prevents stale results but cannot interrupt a Python calculation already running. Analyze and Compare share one processing slot; Live has its own slot. Overlap within each slot receives a retryable busy response. Live accepts frames up to 2 MiB and fits them within 256 pixels per side.
 
 ## Checks
+
+### Latest local AI verification
+
+On **23 September 2026**, the optional AI setup was verified on Windows with Python 3.14.6:
+
+- Pinned AI packages installed in `backend/.venv`; `pip check` reported no broken requirements.
+- The 972,666,916-byte BiRefNet Portrait model passed its configured checksum verification.
+- All 13 tests in `backend.tests.test_ai_cutout` passed. These use stub inference to check contracts, isolation, and alpha behavior.
+- A separate real CPU inference run on a synthetic fixture returned a valid mask and preserved source RGB. Initialization plus inference took approximately 142 seconds on this machine; this is not a general performance benchmark or a portrait-quality evaluation.
+
+### Repeatable checks
 
 From the project root:
 
@@ -134,6 +184,16 @@ npm.cmd --prefix frontend run test:live-integration
 
 This checks real PNG uploads and errors, but is not a browser interaction test. Use the teacher sequence for file picking, visual comparison, zoom, and downloads.
 
+To check actual AI extraction through the running backend with your own local photo:
+
+```powershell
+$env:SPECTRAEDGE_TEST_AI_PHOTO = 'C:\path\to\portrait.jpg'
+npm.cmd --prefix frontend run test:integration
+Remove-Item Env:SPECTRAEDGE_TEST_AI_PHOTO
+```
+
+The ordinary AI contract tests do not require weights and do not measure segmentation quality. See [AI verification](docs/AI_CUTOUT.md#verification) for the optional photo regression checks.
+
 ## Structure and ownership handoff
 
 - `frontend/`: React/TypeScript website, API adapter, shared result/request state, and tests. Owned by the frontend/signal-operations contributor.
@@ -144,5 +204,7 @@ This checks real PNG uploads and errors, but is not a browser interaction test. 
 - `backend/analysis/components.py` provides manual eight-connected component labeling, outer/hole boundary masks, and object measurements. `backend/analysis/multiscale.py` runs independent Gaussian/detector passes and persistence fusion. `backend/signal_ops/noise.py` supplies seeded Gaussian and Salt & Pepper experiments without changing detector algorithms.
 - `backend/live_api.py` handles bounded webcam frames through the same numerical modules. `frontend/components/live-workspace.tsx` and its camera/analysis hooks own the Live lifecycle.
 - `backend/analysis/comparison.py` performs one Gaussian pass followed by all three existing detector, edge-decision, and object-analysis paths for `POST /compare`.
+- `backend/cutout_api.py` owns image preparation and extraction endpoints. `backend/edge_cutout.py` supplies watershed guidance; `backend/cutout.py` supplies GrabCut and brush operations. The editor is in `frontend/components/cutout-workspace.tsx`.
+- `backend/ai_cutout.py` loads and runs the optional local portrait model; `backend/prepare_ai.py` downloads and verifies weights explicitly. Optional packages are pinned in `backend/requirements-ai.txt`.
 
 See [backend/README.md](backend/README.md) for the multipart/JSON contract and [frontend/README.md](frontend/README.md) for integration details. This remains one Git repository. No automatic commits, pushes, or deployments.

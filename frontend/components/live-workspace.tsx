@@ -20,6 +20,7 @@ export default function LiveWorkspace() {
     stream: MediaStream; settings: LiveSettings; processing: number; latency: number; fps: number; frameId: string;
   } | null>(null);
   const [displayError, setDisplayError] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<{ stream: MediaStream | null; width: number; height: number } | null>(null);
   const cadence = useRef<{ stream: MediaStream; settings: LiveSettings; times: number[] } | null>(null);
   const invalid = validateLiveSettings(settings);
   const current = displayed && displayed.stream === stream && sameLiveSettings(displayed.settings, settings) ? displayed : null;
@@ -69,6 +70,16 @@ export default function LiveWorkspace() {
   const update = <K extends keyof LiveSettings>(key: K, value: LiveSettings[K]) =>
     setSettings((previous) => ({ ...previous, [key]: value }));
   const active = cameraStatus === "active";
+  const processingStatus = !active ? (cameraStatus === "requesting" ? "Waiting for camera" : "Idle")
+    : invalid ? "Paused · invalid parameters"
+    : analysis.error || displayError ? "Processing error"
+    : current ? "Processing" : "Waiting for frame";
+  const metrics = active && !invalid && !analysis.error && !displayError ? current : null;
+  const frameResolution = active && resolution?.stream === stream && resolution.width > 0 && resolution.height > 0
+    ? `${resolution.width} × ${resolution.height}` : "--";
+  const readResolution = (video: HTMLVideoElement) => setResolution({
+    stream: video.srcObject as MediaStream | null, width: video.videoWidth, height: video.videoHeight,
+  });
   return <div className="application">
     <a className="skip-link" href="#live-main">Skip to live analyzer</a>
     <header className="topbar"><WorkspaceBrand /><WorkspaceNavigation active="live" /></header>
@@ -107,12 +118,56 @@ export default function LiveWorkspace() {
         <button className="button" onClick={analysis.retry}>Retry processing</button>
       </div>}
       <div className={styles.content}>
+        <div className={styles.inputColumn}>
         <section className={`instrument ${styles.preview}`}>
           <header className="instrument-header"><h2>Camera preview</h2><span className="tag">INPUT</span></header>
-          <video ref={videoRef} autoPlay muted playsInline aria-label="Live webcam preview" className={active ? "" : styles.hidden} />
+          <video ref={videoRef} autoPlay muted playsInline aria-label="Live webcam preview" className={active ? "" : styles.hidden}
+            onLoadedMetadata={(event) => readResolution(event.currentTarget)} onResize={(event) => readResolution(event.currentTarget)} />
           {!active && <p className={styles.placeholder}>Start the camera to see a preview.</p>}
           <footer className="instrument-footer">Source preview · analysis fits within 256 × 256</footer>
         </section>
+        <section className={`instrument ${styles.monitor}`} aria-labelledby="live-monitor-title">
+          <header className="instrument-header"><h2 id="live-monitor-title">Live Signal Monitor</h2><span className="tag">LIVE</span></header>
+          <div className={styles.monitorBody}>
+            <div className={styles.readouts}>
+              <section aria-labelledby="signal-status-title">
+                <h3 id="signal-status-title">Signal Status</h3>
+                <dl className={styles.readout}>
+                  <div><dt>Camera</dt><dd>{active ? "Active" : "Inactive"}</dd></div>
+                  <div><dt>Frame resolution</dt><dd>{frameResolution}</dd></div>
+                  <div><dt>Processing status</dt><dd role="status">{processingStatus}</dd></div>
+                </dl>
+              </section>
+              <section aria-labelledby="processing-parameters-title">
+                <h3 id="processing-parameters-title">Current Processing Parameters</h3>
+                <dl className={styles.readout}>
+                  <div><dt>Selected detector</dt><dd>{settings.detector}</dd></div>
+                  <div><dt>Gaussian sigma</dt><dd>{Number.isFinite(settings.sigma) ? settings.sigma : "--"}</dd></div>
+                  <div><dt>Kernel size</dt><dd>{settings.kernel_size} × {settings.kernel_size}</dd></div>
+                  <div><dt>{thresholdLabel(settings.detector)}</dt><dd>{Number.isFinite(settings.threshold) ? settings.threshold : "--"}</dd></div>
+                </dl>
+              </section>
+              <section aria-labelledby="performance-title">
+                <h3 id="performance-title">Performance Metrics</h3>
+                <dl className={styles.readout}>
+                  <div><dt>Backend processing</dt><dd>{metrics ? `${metrics.processing.toFixed(1)} ms` : "--"}</dd></div>
+                  <div><dt>Processing latency</dt><dd>{metrics ? `${metrics.latency.toFixed(0)} ms` : "--"}</dd></div>
+                  <div><dt>Approximate FPS</dt><dd>{metrics && metrics.fps > 0 ? metrics.fps.toFixed(1) : "--"}</dd></div>
+                </dl>
+                <p className={styles.monitorNote}>Latency includes capture, request and display. FPS measures processed output.</p>
+              </section>
+            </div>
+            <section className={styles.pipeline} aria-labelledby="pipeline-title">
+              <h3 id="pipeline-title">Signal Pipeline</h3>
+              <ol>
+                {["Camera Frame", "Grayscale Conversion", "Gaussian Filtering", "Edge Detector", "Fourier Spectrum"].map((stage, index) =>
+                  <li key={stage}>{index > 0 && <span className={styles.flowArrow} aria-hidden="true">↓</span>}<span className={styles.flowNode}>{stage}</span></li>)}
+              </ol>
+              <p className={styles.monitorNote}>Fourier spectrum uses grayscale input.</p>
+            </section>
+          </div>
+        </section>
+        </div>
         <div className={styles.outputs} aria-label="Synchronized signal outputs">
           {TITLES.map((title, index) => <section className="instrument" key={title}>
             <header className="instrument-header"><h2>{title}</h2></header>
@@ -127,12 +182,6 @@ export default function LiveWorkspace() {
           </section>)}
         </div>
       </div>
-      <dl className={styles.metrics}>
-        <div><dt>Current detector</dt><dd>{settings.detector}</dd></div>
-        <div><dt>Backend processing</dt><dd>{current ? `${current.processing.toFixed(1)} ms` : "—"}</dd></div>
-        <div><dt>Frame latency</dt><dd>{current ? `${current.latency.toFixed(0)} ms` : "—"}</dd></div>
-        <div><dt>Approximate output FPS</dt><dd>{active && !analysis.error && !displayError && current && current.fps > 0 ? current.fps.toFixed(1) : "—"}</dd></div>
-      </dl>
       <p className={styles.note}>Frames are sent to your configured Python backend for processing and kept in memory.
         Stop camera ends capture and releases the webcam. The four outputs share one frame; the camera preview runs independently.</p>
     </main>

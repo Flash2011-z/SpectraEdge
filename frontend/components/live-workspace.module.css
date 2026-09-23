@@ -12,11 +12,23 @@
 .placeholder { min-height: 160px; display: grid; place-items: center; color: var(--muted); font-size: 12px; text-align: center; padding: 20px; }
 .hidden, .preview video.hidden { visibility: hidden; position: absolute; width: 1px; height: 1px; }
 .surface canvas.hidden { visibility: hidden; }
-.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
-.metrics > div { padding: 18px; border: 1px solid var(--border); border-radius: 6px; background: #111a24; }
-.metrics dt { color: var(--muted); font-size: 11px; }
-.metrics dd { margin: 12px 0 0; font: 20px var(--font-mono); }
+.inputColumn { display: grid; gap: 16px; min-width: 0; }
+.monitorBody { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 16px; padding: 16px; }
+.monitor h3 { margin: 0 0 10px; color: var(--muted); font-size: 10px; font-weight: 600; line-height: 1.5; letter-spacing: .04em; }
+.readouts { display: grid; gap: 16px; min-width: 0; }
+.readouts > section + section { border-top: 1px solid var(--border); padding-top: 12px; }
+.readout { display: grid; gap: 8px; margin: 0; font-size: 11px; line-height: 1.5; }
+.readout > div { display: flex; justify-content: space-between; gap: 12px; }
+.readout dt { color: var(--muted); }
+.readout dd { margin: 0; text-align: right; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.pipeline { border-left: 1px solid var(--border); padding-left: 12px; }
+.pipeline ol { list-style: none; padding: 0; margin: 0; }
+.pipeline li { text-align: center; }
+.flowNode { display: block; border: 1px solid var(--border); border-radius: 5px; background: #111a24; padding: 8px 5px; font-size: 10px; line-height: 1.5; }
+.flowArrow { display: block; padding: 3px 0; color: var(--muted); font-size: 12px; }
+.monitorNote { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .note { font-size: 12px; color: var(--muted); line-height: 1.7; }
 .error { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; color: #f6b5a7; }
-@media (max-width: 1000px) { .content { grid-template-columns: 1fr; } .preview { max-width: 440px; width: 100%; } }
-@media (max-width: 650px) { .main { padding: 20px 12px; } .controls, .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outputs { grid-template-columns: 1fr; } }
+@media (min-width: 1001px) and (max-width: 1250px) { .monitorBody { grid-template-columns: 1fr; } .pipeline { border-left: 0; border-top: 1px solid var(--border); padding: 12px 0 0; } }
+@media (max-width: 1000px) { .content { grid-template-columns: 1fr; } .inputColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .monitorBody { grid-template-columns: 1fr; } .pipeline { border-left: 0; border-top: 1px solid var(--border); padding: 12px 0 0; } }
+@media (max-width: 650px) { .main { padding: 20px 12px; } .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outputs, .inputColumn { grid-template-columns: 1fr; } .monitorBody { grid-template-columns: minmax(0, 1fr) 100px; gap: 12px; padding: 12px; } .pipeline { border-top: 0; border-left: 1px solid var(--border); padding: 0 0 0 12px; } }
